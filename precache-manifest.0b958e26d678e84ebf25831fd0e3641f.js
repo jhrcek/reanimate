@@ -4,19 +4,19 @@ self.__precacheManifest = [
     "url": "/reanimate/static/js/runtime~main.78b70e4a.js"
   },
   {
-    "revision": "43a604af0b8918839215",
-    "url": "/reanimate/static/js/main.43a604af.chunk.js"
+    "revision": "bf9b0be1ecaf0ca9a409",
+    "url": "/reanimate/static/js/main.bf9b0be1.chunk.js"
   },
   {
     "revision": "ffff25487f3c44609ff8",
     "url": "/reanimate/static/js/2.ffff2548.chunk.js"
   },
   {
-    "revision": "43a604af0b8918839215",
-    "url": "/reanimate/static/css/main.cd47c360.chunk.css"
+    "revision": "bf9b0be1ecaf0ca9a409",
+    "url": "/reanimate/static/css/main.ec532538.chunk.css"
   },
   {
-    "revision": "c28d814ce1b2acc71ea8913d6999bfd9",
+    "revision": "dfcdc2832e2f97769021d6d940905736",
     "url": "/reanimate/index.html"
   }
 ];
