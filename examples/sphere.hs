@@ -18,10 +18,15 @@ import           Codec.Picture
 import           Data.String.Here
 
 main :: IO ()
-main = reanimate $ mkAnimation 5 $ do
+main = reanimate $ pauseAtEnd 2 $ mkAnimation 5 $ do
     s <- getSignal $ signalFromTo 0 360 signalLinear
+    n <- getSignal $ signalLinear
     emit $ mkBackground "black"
-    emit $ povray [] (script s)
+    emit $ povrayMedium ["+A"] (script s)
+    emit $
+      withFillColor "white" $
+      withFillOpacity n $
+      mkCircle (Num 40.4)
   where
     script s = [iTrim|
 //EXAMPLE OF SPHERE
@@ -39,26 +44,30 @@ main = reanimate $ mkAnimation 5 $ do
 //Place the camera
 camera {
   orthographic
-  angle 50
+  // angle 50
   location <0,0,-10>
   look_at  <0,0,0>
-  right x*image_width/image_height
+  //right x*image_width/image_height
+  up <0,9,0>
+  right <16,0,0>
 }
 
 
 //Ambient light to "brighten up" darker pictures
-global_settings { ambient_light White*3 }
+global_settings { ambient_light White*10 }
 
 //Set a background color
 //background { color White }
 //background { color rgbt <0.1, 0, 0, 0> } // red
 background { color rgbt <0, 0, 0, 1> } // transparent
 
+//intersection
+//{
 //Sphere with specified center point and radius
 sphere {
-  <0,0,0>, 2
+  <0,0,0>, 2.00
   texture {
-    pigment{ color rgbt <0,0,1,0.1> }
+    pigment{ color rgbf <0,0,1,1> }
   }
 }
 
@@ -67,9 +76,9 @@ object {
   texture {
     pigment{ color<1,1,1> }
   }
-  rotate <0,${s},0>
+  rotate <0,${round s::Int},0>
   rotate <-30,0,0>
 }
-
+//}
 
              |]

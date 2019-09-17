@@ -2,6 +2,7 @@
 module Reanimate.Povray
   ( povray
   , povrayQuick
+  , povrayMedium
   , povraySlow
   ) where
 
@@ -29,6 +30,9 @@ povray args = povrayRaw (["+H180","+W320", "+A"] ++ args)
 
 povrayQuick :: [String] -> Text -> Tree
 povrayQuick args = povrayRaw (["+H180","+W320"] ++ args)
+
+povrayMedium :: [String] -> Text -> Tree
+povrayMedium args = povrayRaw (["+H450","+W800"] ++ args)
 
 povraySlow :: [String] -> Text -> Tree
 povraySlow args = povrayRaw (["+H1440","+W2560", "+A"] ++ args)
