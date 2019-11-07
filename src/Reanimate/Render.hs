@@ -78,7 +78,7 @@ render :: Animation
        -> FPS
        -> IO ()
 render ani target format width height fps = do
-  printf "Starting render of animation: %.1f\n" (duration ani)
+  printf "Starting render of animation: %.1f\n" (realToFrac (duration ani) :: Double)
   ffmpeg <- requireExecutable "ffmpeg"
   generateFrames ani width height fps $ \template ->
     withTempFile "txt" $ \progress -> writeFile progress "" >>

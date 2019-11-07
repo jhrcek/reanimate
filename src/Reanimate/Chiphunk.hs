@@ -57,9 +57,9 @@ renderBodyStore space store = do
   return $ mkGroup result
 
 
-simulate :: Space -> BodyStore -> Double -> Int -> Double -> IO Animation
+simulate :: Space -> BodyStore -> Rational -> Int -> Rational -> IO Animation
 simulate space store fps stepsPerFrame dur = do
-  let timeStep = 1/(fps*fromIntegral stepsPerFrame)
+  let timeStep = realToFrac $ 1/(fps*fromIntegral stepsPerFrame)
       frames = round (dur * fps)
   v <- V.new frames
   forM_ [0..frames-1] $ \nth -> do

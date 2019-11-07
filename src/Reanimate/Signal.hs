@@ -6,21 +6,21 @@ module Reanimate.Signal
   , curveS
   , bellS
   , oscillateS
-  , fromListS
+  -- , fromListS
   ) where
 
 -- | Signals are time-varying variables. Signals can be composed using function
 --   composition.
-type Signal = Double -> Double
+type Signal = Rational -> Rational
 
-fromListS :: [(Double, Signal)] -> Signal
-fromListS fns t = worker 0 fns
-  where
-    worker _ [] = 0
-    worker now [(len, fn)] = fn (min 1 ((t-now) / min (1-now) len))
-    worker now ((len, fn):rest)
-      | now+len < t = worker (now+len) rest
-      | otherwise = fn ((t-now) / len)
+-- fromListS :: [(Double, Signal)] -> Signal
+-- fromListS fns t = worker 0 fns
+--   where
+--     worker _ [] = 0
+--     worker now [(len, fn)] = fn (min 1 ((t-now) / min (1-now) len))
+--     worker now ((len, fn):rest)
+--       | now+len < t = worker (now+len) rest
+--       | otherwise = fn ((t-now) / len)
 
 -- | Constant signal.
 --
@@ -29,7 +29,7 @@ fromListS fns t = worker 0 fns
 --   > signalA (constantS 0.5) drawProgress
 --
 --   <<docs/gifs/doc_constantS.gif>>
-constantS :: Double -> Signal
+constantS :: Rational -> Signal
 constantS x = const x
 
 -- | Signal with new starting and end values.
@@ -39,7 +39,7 @@ constantS x = const x
 --   > signalA (fromToS 0.8 0.2) drawProgress
 --
 --   <<docs/gifs/doc_fromToS.gif>>
-fromToS :: Double -> Double -> Signal
+fromToS :: Rational -> Rational -> Signal
 fromToS from to t = from + (to-from)*t
 
 -- | Reverse signal order.
@@ -59,11 +59,11 @@ reverseS t = 1-t
 --   > signalA (curveS 2) drawProgress
 --
 --   <<docs/gifs/doc_curveS.gif>>
-curveS :: Double -> Signal
+curveS :: Integer -> Signal
 curveS steepness s =
   if s < 0.5
-    then 0.5 * (2*s)**steepness
-    else 1-0.5 * (2 - 2*s)**steepness
+    then 0.5 * (2*s)^steepness
+    else 1-0.5 * (2 - 2*s)^steepness
 
 -- | Oscillate signal.
 --
@@ -85,5 +85,5 @@ oscillateS t =
 --   > signalA (bellS 2) drawProgress
 --
 --   <<docs/gifs/doc_bellS.gif>>
-bellS :: Double -> Signal
+bellS :: Integer -> Signal
 bellS steepness = curveS steepness . oscillateS

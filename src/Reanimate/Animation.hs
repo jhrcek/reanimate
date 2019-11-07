@@ -14,9 +14,11 @@ import           Reanimate.Svg.Constructors
 import           Text.XML.Light.Output
 
 -- | Duration of an animation or effect. Usually measured in seconds.
-type Duration = Double
--- | Time signal. Goes from 0 to 1, inclusive.
-type Time = Double
+type Duration = Rational
+-- | Time signal. Goes from [0,1[
+type Time = Rational
+
+type Percentage = Rational
 
 type SVG = Tree
 
@@ -129,7 +131,7 @@ pause d = Animation d (const None)
 andThen :: Animation -> Animation -> Animation
 andThen a b = a `parA` (pause (duration a) `seqA` b)
 
-frameAt :: Double -> Animation -> Tree
+frameAt :: Rational -> Animation -> Tree
 frameAt t (Animation d f) = f t'
   where
     t' = min 1 (max 0 (t/d))
@@ -202,7 +204,7 @@ pauseUntil :: Duration -> Animation -> Animation
 pauseUntil d a = pauseAtEnd (d-duration a) a
 
 -- Freeze frame at time @t@.
-freezeFrame :: Double -> Animation -> (Time -> SVG)
+freezeFrame :: Rational -> Animation -> (Time -> SVG)
 freezeFrame t (Animation d f) = const $ f (t/d)
 
 -- | Change the duration of an animation. Animates are stretched or squished
@@ -247,7 +249,7 @@ playThenReverseA a = a `seqA` reverseA a
 --   > repeatA 1.5 drawCircle
 --
 --   <<docs/gifs/doc_repeatA.gif>>
-repeatA :: Double -> Animation -> Animation
+repeatA :: Rational -> Animation -> Animation
 repeatA n (Animation d f) = Animation (d*n) $ \t ->
   f ((t*n) `mod'` 1)
 

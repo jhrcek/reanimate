@@ -36,7 +36,7 @@ drawProgress = mkAnimation 2 $ \t ->
   mkGroup
   [ mkLine (-screenWidth/2*widthP,0)
            (screenWidth/2*widthP,0)
-  , translate (-screenWidth/2*widthP + screenWidth*widthP*t) 0 $
+  , translate (-screenWidth/2*widthP + screenWidth*widthP*realToFrac t) 0 $
     withFillOpacity 1 $ mkCircle 0.5 ]
   where
     widthP = 0.8
