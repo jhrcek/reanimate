@@ -11,6 +11,7 @@ import           Control.Monad
 import           Control.Monad.Fix       (fix)
 import           Data.Text               (Text)
 import qualified Data.Text               as T
+import qualified Data.Text.IO            as T
 import qualified Data.Text.Read          as T
 import           GHC.Environment         (getFullArgs)
 import           Network.WebSockets
@@ -64,9 +65,10 @@ serve = withManager $ \watch -> do
               killThread tid
         stop <- watchFile watch self handler
         putMVar slave =<< forkIO (return ())
+        handler
         let loop = do
-              -- FIXME: We don't use fps here.
-              _fps <- receiveData conn :: IO T.Text
+              -- FIXME: We don't use msg here.
+              _msg <- receiveData conn :: IO T.Text
               handler
               loop
         loop `finally` (swapMVar hasConnectionVar False >> stop >> killSlave)
@@ -89,24 +91,25 @@ slaveHandler conn self =
   withSystemTempDirectory "reanimate" $ \tmpDir ->
   withTempFile tmpDir "reanimate.exe" $ \tmpExecutable handle -> do
     hClose handle
-    sendTextData conn (T.pack "Compiling")
+    sendTextData conn (T.pack "status\nCompiling")
     ret <- runCmd_ "stack" $ ["ghc", "--"] ++ ghcOptions tmpDir ++ [takeFileName self, "-o", tmpExecutable]
     case ret of
       Left err ->
-        sendTextData conn $ T.pack $ "Error" ++ unlines (drop 3 (lines err))
+        sendTextData conn $ T.pack $ "error\n" ++ unlines (drop 3 (lines err))
       Right{} -> runCmdLazy tmpExecutable execOpts $ \getFrame -> do
         (frameCount,_) <- expectFrame =<< getFrame
-        sendTextData conn (T.pack $ show frameCount)
+        sendTextData conn (T.pack $ "frame_count\n" ++ show frameCount)
         fix $ \loop -> do
           (frameIdx, frame) <- expectFrame =<< getFrame
-          sendTextData conn (T.pack $ show frameIdx)
-          sendTextData conn frame
+          let fileName = "/tmp/" ++ show frameIdx ++ ".svg"
+          T.writeFile fileName frame
+          sendTextData conn (T.pack $ "frame\n" ++ show frameIdx ++ "\n" ++ fileName)
           loop
   where
     execOpts = ["raw", "+RTS", "-N", "-M1G", "-RTS"]
     expectFrame :: Either String Text -> IO (Integer, Text)
     expectFrame (Left "") = do
-      sendTextData conn (T.pack "Done")
+      sendTextData conn (T.pack "status\nDone")
       exitSuccess
     expectFrame (Left err) = do
       sendTextData conn $ T.pack $ "Error" ++ err
@@ -116,7 +119,7 @@ slaveHandler conn self =
         Left err -> do
           hPutStrLn stderr (T.unpack frame)
           hPutStrLn stderr $ "expectFrame: " ++ err
-          sendTextData conn $ T.pack $ "Error" ++ err
+          sendTextData conn $ T.pack $ "error\n" ++ err
           exitWith (ExitFailure 1)
         Right (frameNumber, rest) ->
           pure (frameNumber, rest)
