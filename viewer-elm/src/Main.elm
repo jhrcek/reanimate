@@ -1,63 +1,16 @@
 module Main exposing (main)
 
-{-| WebSocketClient Example
--}
-
 import Browser
 import Browser.Events
-import Cmd.Extra exposing (withCmd, withNoCmd)
 import Dict exposing (Dict)
 import Html exposing (Html, button, div, h1, img, input, p, text)
-import Html.Attributes exposing (checked, disabled, size, src, style, type_, value)
+import Html.Attributes as Attr exposing (size, src, style, value)
 import Html.Events exposing (onClick, onInput)
-import Json.Encode exposing (Value)
+import Json.Decode
 import Platform.Sub
-import PortFunnel.WebSocket as WebSocket exposing (Response(..))
-import PortFunnels exposing (FunnelDict, Handler(..), State)
+import Ports
 import Time exposing (Posix, millisToPosix, posixToMillis)
-
-
-handlers : List (Handler Model Msg)
-handlers =
-    [ WebSocketHandler socketHandler
-    ]
-
-
-subscriptions : Model -> Sub Msg
-subscriptions _ =
-    Platform.Sub.batch
-        [ PortFunnels.subPort Process
-        , Browser.Events.onAnimationFrame NewClock
-        ]
-
-
-funnelDict : FunnelDict Model Msg
-funnelDict =
-    PortFunnels.makeFunnelDict handlers PortFunnels.cmdPort
-
-
-
--- MODEL
-
-
-defaultUrl : String
-defaultUrl =
-    "ws://localhost:9161"
-
-
-type alias Model =
-    { send : String
-    , log : List String
-    , url : String
-    , wasLoaded : Bool
-    , state : State
-    , key : String
-    , error : Maybe String
-    , frameCount : Maybe Int
-    , status : String
-    , frames : Dict Int String
-    , clock : Posix
-    }
+import WebSocket
 
 
 main : Program () Model Msg
@@ -70,161 +23,135 @@ main =
         }
 
 
+subscriptions : Model -> Sub Msg
+subscriptions _ =
+    Platform.Sub.batch
+        [ Ports.receiveSocketMsg (WebSocket.receive MessageReceived)
+        , Browser.Events.onAnimationFrame TimestampReceived
+        ]
+
+
+type alias Model =
+    { log : List String
+    , url : String
+    , wasLoaded : Bool
+    , key : String
+    , error : Maybe String
+    , frameCount : Maybe Int
+    , status : String
+    , frames : Dict Int String
+    , clock : Posix
+    }
+
+
+defaultUrl : String
+defaultUrl =
+    "ws://localhost:9161"
+
+
+socketName : String
+socketName =
+    "TheSocket"
+
+
 init : () -> ( Model, Cmd Msg )
 init _ =
-    { send = "Hello World!"
-    , log = []
-    , url = defaultUrl
-    , wasLoaded = False
-    , state = PortFunnels.initialState
-    , key = "socket"
-    , error = Nothing
-    , frameCount = Nothing
-    , status = "Not connected"
-    , frames = Dict.empty
-    , clock = millisToPosix 0
-    }
-        |> withNoCmd
+    ( { log = []
+      , url = defaultUrl
+      , wasLoaded = False
+      , key = "socket"
+      , error = Nothing
+      , frameCount = Nothing
+      , status = "Not connected"
+      , frames = Dict.empty
+      , clock = millisToPosix 0
+      }
+    , Cmd.none
+    )
 
 
+connectCmd : String -> Cmd msg
+connectCmd url =
+    WebSocket.send Ports.sendSocketCommand <|
+        WebSocket.Connect
+            { name = socketName
+            , address = url
+            , protocol = ""
+            }
 
--- UPDATE
+
+closeCmd : Cmd msg
+closeCmd =
+    WebSocket.send Ports.sendSocketCommand <|
+        WebSocket.Close { name = socketName }
 
 
 type Msg
-    = UpdateUrl String
-    | ToggleAutoReopen
-    | Connect
-    | Close
-    | Process Value
-    | NewClock Posix
+    = UrlUpdated String
+    | MessageReceived (Result Json.Decode.Error WebSocket.WebSocketMsg)
+    | ConnectClicked
+    | CloseClicked
+    | TimestampReceived Posix
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        UpdateUrl url ->
-            { model | url = url } |> withNoCmd
+        UrlUpdated url ->
+            ( { model | url = url }, Cmd.none )
 
-        ToggleAutoReopen ->
-            let
-                state =
-                    model.state
-
-                socketState =
-                    state.websocket
-
-                autoReopen =
-                    WebSocket.willAutoReopen model.key socketState
-            in
-            { model
-                | state =
-                    { state
-                        | websocket =
-                            WebSocket.setAutoReopen
-                                model.key
-                                (not autoReopen)
-                                socketState
-                    }
-            }
-                |> withNoCmd
-
-        Connect ->
-            model
-                |> logMessage ("Connecting to " ++ model.url)
-                |> withCmd (WebSocket.makeOpenWithKey model.key model.url |> send)
-
-        Close ->
-            { model | log = "Closing" :: model.log }
-                |> withCmd (WebSocket.makeClose model.key |> send)
-
-        Process value ->
-            case
-                PortFunnels.processValue funnelDict value model.state model
-            of
-                Err error ->
-                    { model | error = Just error } |> withNoCmd
-
-                Ok res ->
-                    res
-
-        NewClock clock ->
-            { model | clock = clock } |> withNoCmd
-
-
-send : WebSocket.Message -> Cmd Msg
-send message =
-    WebSocket.send PortFunnels.cmdPort message
-
-
-doIsLoaded : Model -> Model
-doIsLoaded model =
-    if not model.wasLoaded && WebSocket.isLoaded model.state.websocket then
-        { model | wasLoaded = True }
-
-    else
-        model
-
-
-socketHandler : Response -> State -> Model -> ( Model, Cmd Msg )
-socketHandler response state mdl =
-    let
-        model =
-            doIsLoaded
-                { mdl
-                    | state = state
-                    , error = Nothing
-                }
-    in
-    case response of
-        WebSocket.MessageReceivedResponse { message } ->
-            ( case String.lines message of
-                [ "status", status ] ->
-                    { model | status = status }
-
-                [ "frame_count", n ] ->
-                    { model | frameCount = String.toInt n }
-
-                [ "frame", n, svg ] ->
-                    let
-                        nth =
-                            Maybe.withDefault 0 (String.toInt n)
-                    in
-                    { model | frames = Dict.insert nth svg model.frames }
-
-                _ ->
-                    model
-                        |> logMessage ("Received \"" ++ message ++ "\"")
-            , Cmd.none
+        ConnectClicked ->
+            ( model |> logMessage ("Connecting to " ++ model.url)
+            , connectCmd model.url
             )
 
-        WebSocket.ConnectedResponse r ->
-            model
-                |> logMessage ("Connected: " ++ r.description)
-                |> withNoCmd
+        CloseClicked ->
+            ( { model | frames = Dict.empty, status = "Not connected" }
+                |> logMessage "Closing"
+            , closeCmd
+            )
 
-        WebSocket.ClosedResponse { code, wasClean, expected } ->
-            { model | frameCount = Nothing }
-                |> logMessage ("Closed, " ++ closedString code wasClean expected)
-                |> withNoCmd
+        TimestampReceived clock ->
+            ( { model | clock = clock }, Cmd.none )
 
-        WebSocket.ErrorResponse error ->
-            { model | frameCount = Nothing }
-                |> logMessage (WebSocket.errorToString error)
-                |> withNoCmd
+        MessageReceived result ->
+            processResult result model
+
+
+processResult : Result Json.Decode.Error WebSocket.WebSocketMsg -> Model -> ( Model, Cmd Msg )
+processResult result model =
+    case result of
+        Err decodeError ->
+            ( { model | error = Just <| Json.Decode.errorToString decodeError }, Cmd.none )
+
+        Ok wsMsg ->
+            case wsMsg of
+                WebSocket.Error { error } ->
+                    ( { model | error = Just error }, Cmd.none )
+
+                WebSocket.Data { data } ->
+                    ( processMessage data model, Cmd.none )
+
+
+processMessage : String -> Model -> Model
+processMessage data model =
+    case String.lines data of
+        [ "status", status ] ->
+            { model | status = status }
+
+        [ "frame_count", n ] ->
+            { model | frameCount = String.toInt n }
+
+        [ "frame", n, svg ] ->
+            let
+                nth =
+                    Maybe.withDefault 0 (String.toInt n)
+            in
+            { model | frames = Dict.insert nth svg model.frames }
 
         _ ->
-            ( case WebSocket.reconnectedResponses response of
-                [] ->
-                    model
-
-                [ ReconnectedResponse r ] ->
-                    logMessage ("Reconnected: " ++ r.description) model
-
-                list ->
-                    logMessage (Debug.toString list) model
-            , Cmd.none
-            )
+            model
+                |> logMessage ("Message not recognized \"" ++ data ++ "\"")
 
 
 logMessage : String -> Model -> Model
@@ -232,32 +159,8 @@ logMessage msg model =
     { model | log = msg :: model.log }
 
 
-closedString : WebSocket.ClosedCode -> Bool -> Bool -> String
-closedString code wasClean expected =
-    "code: "
-        ++ WebSocket.closedCodeToString code
-        ++ ", "
-        ++ (if wasClean then
-                "clean"
-
-            else
-                "not clean"
-           )
-        ++ ", "
-        ++ (if expected then
-                "expected"
-
-            else
-                "NOT expected"
-           )
-
-
-
--- VIEW
-
-
-b : String -> Html Msg
-b string =
+bold : String -> Html msg
+bold string =
     Html.b [] [ text string ]
 
 
@@ -269,9 +172,6 @@ br =
 view : Model -> Html Msg
 view model =
     let
-        isConnected =
-            WebSocket.isConnected model.key model.state.websocket
-
         frameCount =
             Maybe.withDefault 1 model.frameCount
 
@@ -293,57 +193,57 @@ view model =
         ]
         [ h1 [] [ text "Reanimate: elm viewer" ]
         , p []
-            [ b "url: "
+            [ bold "url: "
             , input
                 [ value model.url
-                , onInput UpdateUrl
+                , onInput UrlUpdated
                 , size 30
-                , disabled isConnected
+
+                -- , disabled isConnected
                 ]
                 []
             , text " "
-            , if isConnected then
-                button [ onClick Close ]
-                    [ text "Close" ]
+            , button [ onClick ConnectClicked ] [ text "Connect" ]
 
-              else
-                button [ onClick Connect ]
-                    [ text "Connect" ]
+            -- TODO add WS state management and show just one button at time
+            , button [ onClick CloseClicked ] [ text "Close" ]
             , br
-            , b "Frame: "
+            , bold "Frame: "
             , text (String.fromInt thisFrame)
             , br
             , case bestFrame of
                 Nothing ->
-                    b "no frames yet"
+                    bold "no frames yet"
 
                 Just path ->
                     img [ src path ] []
-            , b "Status: "
+            , bold "Status: "
             , text model.status
             , br
-            , b "Fetched frames: "
-            , text (String.fromInt (Dict.size model.frames))
-            , br
-            , b "frames: "
-            , text (Maybe.withDefault "no frames" (Maybe.map String.fromInt model.frameCount))
-            , br
-            , b "auto reopen: "
-            , input
-                [ type_ "checkbox"
-                , onClick ToggleAutoReopen
-                , checked <|
-                    WebSocket.willAutoReopen
-                        model.key
-                        model.state.websocket
-                ]
-                []
+            , progressIndicator model
             ]
         , p [] <|
-            List.concat
-                [ [ b "Log:"
-                  , br
-                  ]
-                , List.intersperse br (List.map text model.log)
-                ]
+            bold "Log:"
+                :: List.intersperse br (List.map text model.log)
         ]
+
+
+progressIndicator : Model -> Html msg
+progressIndicator { frames, frameCount } =
+    case frameCount of
+        Nothing ->
+            bold "No frames available"
+
+        Just frameCnt ->
+            if Dict.size frames == frameCnt then
+                bold (String.fromInt frameCnt ++ " frames loaded")
+
+            else
+                Html.div []
+                    [ bold "Loading frames "
+                    , Html.progress
+                        [ Attr.max (String.fromInt frameCnt)
+                        , value (String.fromInt <| Dict.size frames)
+                        ]
+                        []
+                    ]

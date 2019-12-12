@@ -2,14 +2,35 @@
   <head>
     <title>WebSocketClient Example</title>
     <script type='text/javascript' src='elm.js'></script>
-    <script type='text/javascript' src='js/PortFunnel.js'></script>
-    <script type='text/javascript' src='js/PortFunnel/WebSocket.js'></script>
   </head>
   <body>
     <div id='elm'></div>
     <script type='text/javascript'>
+      var mySockets = {};
+
+      function sendSocketCommand(wat) {
+        if (wat.cmd == "connect") {
+          //console.log("connecting!");
+          socket = new WebSocket(wat.address);
+          socket.onmessage = function (event) {
+            //console.log( "onmessage: " +  JSON.stringify(event.data, null, 4));
+            app.ports.receiveSocketMsg.send({ name : wat.name
+                                            , msg : "data"
+                                            , data : event.data} );
+          }
+          mySockets[wat.name] = socket;
+        } else if (wat.cmd == "send") {
+          //console.log("sending to socket: " + wat.name );
+          mySockets[wat.name].send(wat.content);
+        } else if (wat.cmd == "close") {
+          //console.log("closing socket: " + wat.name);
+          mySockets[wat.name].close();
+          delete mySockets[wat.name];
+        }
+      }
+
       var app = Elm.Main.init({node: document.getElementById('elm')});
-      PortFunnel.subscribe(app);
+      app.ports.sendSocketCommand.subscribe(sendSocketCommand);
     </script>
   </body>
 </html>
