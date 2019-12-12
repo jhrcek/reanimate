@@ -5087,6 +5087,10 @@ var $elm$core$Set$empty = $elm$core$Set$Set_elm_builtin($elm$core$Dict$empty);
 var $billstclair$elm_websocket_client$PortFunnel$WebSocket$initialState = $billstclair$elm_websocket_client$PortFunnel$WebSocket$State(
 	{continuationCounter: 0, continuations: $elm$core$Dict$empty, isLoaded: false, noAutoReopenKeys: $elm$core$Set$empty, queues: $elm$core$Dict$empty, socketStates: $elm$core$Dict$empty});
 var $author$project$PortFunnels$initialState = {websocket: $billstclair$elm_websocket_client$PortFunnel$WebSocket$initialState};
+var $elm$time$Time$Posix = function (a) {
+	return {$: 'Posix', a: a};
+};
+var $elm$time$Time$millisToPosix = $elm$time$Time$Posix;
 var $elm$core$Platform$Cmd$batch = _Platform_batch;
 var $elm$core$Platform$Cmd$none = $elm$core$Platform$Cmd$batch(_List_Nil);
 var $Janiczek$cmd_extra$Cmd$Extra$withNoCmd = function (model) {
@@ -5094,18 +5098,172 @@ var $Janiczek$cmd_extra$Cmd$Extra$withNoCmd = function (model) {
 };
 var $author$project$Main$init = function (_v0) {
 	return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
-		{error: $elm$core$Maybe$Nothing, frameCount: $elm$core$Maybe$Nothing, frames: $elm$core$Dict$empty, key: 'socket', log: _List_Nil, send: 'Hello World!', state: $author$project$PortFunnels$initialState, status: 'Not connected', url: $author$project$Main$defaultUrl, useSimulator: true, wasLoaded: false});
+		{
+			clock: $elm$time$Time$millisToPosix(0),
+			error: $elm$core$Maybe$Nothing,
+			frameCount: $elm$core$Maybe$Nothing,
+			frames: $elm$core$Dict$empty,
+			key: 'socket',
+			log: _List_Nil,
+			send: 'Hello World!',
+			state: $author$project$PortFunnels$initialState,
+			status: 'Not connected',
+			url: $author$project$Main$defaultUrl,
+			useSimulator: true,
+			wasLoaded: false
+		});
+};
+var $author$project$Main$NewClock = function (a) {
+	return {$: 'NewClock', a: a};
 };
 var $author$project$Main$Process = function (a) {
 	return {$: 'Process', a: a};
 };
+var $elm$core$Platform$Sub$batch = _Platform_batch;
+var $elm$browser$Browser$AnimationManager$Time = function (a) {
+	return {$: 'Time', a: a};
+};
+var $elm$browser$Browser$AnimationManager$State = F3(
+	function (subs, request, oldTime) {
+		return {oldTime: oldTime, request: request, subs: subs};
+	});
+var $elm$browser$Browser$AnimationManager$init = $elm$core$Task$succeed(
+	A3($elm$browser$Browser$AnimationManager$State, _List_Nil, $elm$core$Maybe$Nothing, 0));
+var $elm$core$Process$kill = _Scheduler_kill;
+var $elm$browser$Browser$AnimationManager$now = _Browser_now(_Utils_Tuple0);
+var $elm$browser$Browser$AnimationManager$rAF = _Browser_rAF(_Utils_Tuple0);
+var $elm$core$Platform$sendToSelf = _Platform_sendToSelf;
+var $elm$core$Process$spawn = _Scheduler_spawn;
+var $elm$browser$Browser$AnimationManager$onEffects = F3(
+	function (router, subs, _v0) {
+		var request = _v0.request;
+		var oldTime = _v0.oldTime;
+		var _v1 = _Utils_Tuple2(request, subs);
+		if (_v1.a.$ === 'Nothing') {
+			if (!_v1.b.b) {
+				var _v2 = _v1.a;
+				return $elm$browser$Browser$AnimationManager$init;
+			} else {
+				var _v4 = _v1.a;
+				return A2(
+					$elm$core$Task$andThen,
+					function (pid) {
+						return A2(
+							$elm$core$Task$andThen,
+							function (time) {
+								return $elm$core$Task$succeed(
+									A3(
+										$elm$browser$Browser$AnimationManager$State,
+										subs,
+										$elm$core$Maybe$Just(pid),
+										time));
+							},
+							$elm$browser$Browser$AnimationManager$now);
+					},
+					$elm$core$Process$spawn(
+						A2(
+							$elm$core$Task$andThen,
+							$elm$core$Platform$sendToSelf(router),
+							$elm$browser$Browser$AnimationManager$rAF)));
+			}
+		} else {
+			if (!_v1.b.b) {
+				var pid = _v1.a.a;
+				return A2(
+					$elm$core$Task$andThen,
+					function (_v3) {
+						return $elm$browser$Browser$AnimationManager$init;
+					},
+					$elm$core$Process$kill(pid));
+			} else {
+				return $elm$core$Task$succeed(
+					A3($elm$browser$Browser$AnimationManager$State, subs, request, oldTime));
+			}
+		}
+	});
+var $elm$browser$Browser$AnimationManager$onSelfMsg = F3(
+	function (router, newTime, _v0) {
+		var subs = _v0.subs;
+		var oldTime = _v0.oldTime;
+		var send = function (sub) {
+			if (sub.$ === 'Time') {
+				var tagger = sub.a;
+				return A2(
+					$elm$core$Platform$sendToApp,
+					router,
+					tagger(
+						$elm$time$Time$millisToPosix(newTime)));
+			} else {
+				var tagger = sub.a;
+				return A2(
+					$elm$core$Platform$sendToApp,
+					router,
+					tagger(newTime - oldTime));
+			}
+		};
+		return A2(
+			$elm$core$Task$andThen,
+			function (pid) {
+				return A2(
+					$elm$core$Task$andThen,
+					function (_v1) {
+						return $elm$core$Task$succeed(
+							A3(
+								$elm$browser$Browser$AnimationManager$State,
+								subs,
+								$elm$core$Maybe$Just(pid),
+								newTime));
+					},
+					$elm$core$Task$sequence(
+						A2($elm$core$List$map, send, subs)));
+			},
+			$elm$core$Process$spawn(
+				A2(
+					$elm$core$Task$andThen,
+					$elm$core$Platform$sendToSelf(router),
+					$elm$browser$Browser$AnimationManager$rAF)));
+	});
+var $elm$browser$Browser$AnimationManager$Delta = function (a) {
+	return {$: 'Delta', a: a};
+};
+var $elm$core$Basics$composeL = F3(
+	function (g, f, x) {
+		return g(
+			f(x));
+	});
+var $elm$browser$Browser$AnimationManager$subMap = F2(
+	function (func, sub) {
+		if (sub.$ === 'Time') {
+			var tagger = sub.a;
+			return $elm$browser$Browser$AnimationManager$Time(
+				A2($elm$core$Basics$composeL, func, tagger));
+		} else {
+			var tagger = sub.a;
+			return $elm$browser$Browser$AnimationManager$Delta(
+				A2($elm$core$Basics$composeL, func, tagger));
+		}
+	});
+_Platform_effectManagers['Browser.AnimationManager'] = _Platform_createManager($elm$browser$Browser$AnimationManager$init, $elm$browser$Browser$AnimationManager$onEffects, $elm$browser$Browser$AnimationManager$onSelfMsg, 0, $elm$browser$Browser$AnimationManager$subMap);
+var $elm$browser$Browser$AnimationManager$subscription = _Platform_leaf('Browser.AnimationManager');
+var $elm$browser$Browser$AnimationManager$onAnimationFrame = function (tagger) {
+	return $elm$browser$Browser$AnimationManager$subscription(
+		$elm$browser$Browser$AnimationManager$Time(tagger));
+};
+var $elm$browser$Browser$Events$onAnimationFrame = $elm$browser$Browser$AnimationManager$onAnimationFrame;
 var $elm$json$Json$Decode$value = _Json_decodeValue;
 var $author$project$PortFunnels$subPort = _Platform_incomingPort('subPort', $elm$json$Json$Decode$value);
 var $author$project$PortFunnels$subscriptions = F2(
 	function (process, model) {
 		return $author$project$PortFunnels$subPort(process);
 	});
-var $author$project$Main$subscriptions = $author$project$PortFunnels$subscriptions($author$project$Main$Process);
+var $author$project$Main$subscriptions = function (model) {
+	return $elm$core$Platform$Sub$batch(
+		_List_fromArray(
+			[
+				A2($author$project$PortFunnels$subscriptions, $author$project$Main$Process, model),
+				$elm$browser$Browser$Events$onAnimationFrame($author$project$Main$NewClock)
+			]));
+};
 var $author$project$PortFunnels$cmdPort = _Platform_outgoingPort('cmdPort', $elm$core$Basics$identity);
 var $elm$core$Basics$compare = _Utils_compare;
 var $elm$core$Dict$get = F2(
@@ -7450,6 +7608,7 @@ var $author$project$Main$socketHandler = F3(
 					_Utils_update(
 						model,
 						{
+							frameCount: $elm$core$Maybe$Nothing,
 							log: A2(
 								$elm$core$List$cons,
 								'Closed, ' + A3($author$project$Main$closedString, code, wasClean, expected),
@@ -7461,6 +7620,7 @@ var $author$project$Main$socketHandler = F3(
 					_Utils_update(
 						model,
 						{
+							frameCount: $elm$core$Maybe$Nothing,
 							log: A2(
 								$elm$core$List$cons,
 								$billstclair$elm_websocket_client$PortFunnel$WebSocket$errorToString(error),
@@ -7808,7 +7968,7 @@ var $author$project$Main$update = F2(
 						{
 							log: A2($elm$core$List$cons, 'Closing', model.log)
 						}));
-			default:
+			case 'Process':
 				var value = msg.a;
 				var _v1 = A4($author$project$PortFunnels$processValue, $author$project$Main$funnelDict, value, model.state, model);
 				if (_v1.$ === 'Err') {
@@ -7823,6 +7983,12 @@ var $author$project$Main$update = F2(
 					var res = _v1.a;
 					return res;
 				}
+			default:
+				var clock = msg.a;
+				return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
+					_Utils_update(
+						model,
+						{clock: clock}));
 		}
 	});
 var $author$project$Main$Close = {$: 'Close'};
@@ -7831,7 +7997,6 @@ var $author$project$Main$ToggleAutoReopen = {$: 'ToggleAutoReopen'};
 var $author$project$Main$UpdateUrl = function (a) {
 	return {$: 'UpdateUrl', a: a};
 };
-var $elm$html$Html$a = _VirtualDom_node('a');
 var $elm$html$Html$b = _VirtualDom_node('b');
 var $elm$virtual_dom$VirtualDom$text = _VirtualDom_text;
 var $elm$html$Html$text = $elm$virtual_dom$VirtualDom$text;
@@ -7857,29 +8022,51 @@ var $elm$html$Html$Attributes$boolProperty = F2(
 var $elm$html$Html$Attributes$checked = $elm$html$Html$Attributes$boolProperty('checked');
 var $elm$html$Html$Attributes$disabled = $elm$html$Html$Attributes$boolProperty('disabled');
 var $elm$html$Html$div = _VirtualDom_node('div');
-var $elm$html$Html$p = _VirtualDom_node('p');
-var $author$project$Main$docp = function (string) {
-	return A2(
-		$elm$html$Html$p,
-		_List_Nil,
-		_List_fromArray(
-			[
-				$elm$html$Html$text(string)
-			]));
-};
-var $elm$html$Html$h1 = _VirtualDom_node('h1');
-var $elm$html$Html$Attributes$stringProperty = F2(
-	function (key, string) {
-		return A2(
-			_VirtualDom_property,
-			key,
-			$elm$json$Json$Encode$string(string));
+var $elm$core$Dict$foldl = F3(
+	function (func, acc, dict) {
+		foldl:
+		while (true) {
+			if (dict.$ === 'RBEmpty_elm_builtin') {
+				return acc;
+			} else {
+				var key = dict.b;
+				var value = dict.c;
+				var left = dict.d;
+				var right = dict.e;
+				var $temp$func = func,
+					$temp$acc = A3(
+					func,
+					key,
+					value,
+					A3($elm$core$Dict$foldl, func, acc, left)),
+					$temp$dict = right;
+				func = $temp$func;
+				acc = $temp$acc;
+				dict = $temp$dict;
+				continue foldl;
+			}
+		}
 	});
-var $elm$html$Html$Attributes$href = function (url) {
-	return A2(
-		$elm$html$Html$Attributes$stringProperty,
-		'href',
-		_VirtualDom_noJavaScriptUri(url));
+var $elm$core$Dict$filter = F2(
+	function (isGood, dict) {
+		return A3(
+			$elm$core$Dict$foldl,
+			F3(
+				function (k, v, d) {
+					return A2(isGood, k, v) ? A3($elm$core$Dict$insert, k, v, d) : d;
+				}),
+			$elm$core$Dict$empty,
+			dict);
+	});
+var $elm$html$Html$h1 = _VirtualDom_node('h1');
+var $elm$core$List$head = function (list) {
+	if (list.b) {
+		var x = list.a;
+		var xs = list.b;
+		return $elm$core$Maybe$Just(x);
+	} else {
+		return $elm$core$Maybe$Nothing;
+	}
 };
 var $elm$html$Html$img = _VirtualDom_node('img');
 var $elm$html$Html$input = _VirtualDom_node('input');
@@ -7918,6 +8105,7 @@ var $elm$core$Maybe$map = F2(
 			return $elm$core$Maybe$Nothing;
 		}
 	});
+var $elm$core$Basics$modBy = _Basics_modBy;
 var $elm$virtual_dom$VirtualDom$Normal = function (a) {
 	return {$: 'Normal', a: a};
 };
@@ -7966,6 +8154,11 @@ var $elm$html$Html$Events$onInput = function (tagger) {
 			$elm$html$Html$Events$alwaysStop,
 			A2($elm$json$Json$Decode$map, tagger, $elm$html$Html$Events$targetValue)));
 };
+var $elm$html$Html$p = _VirtualDom_node('p');
+var $elm$time$Time$posixToMillis = function (_v0) {
+	var millis = _v0.a;
+	return millis;
+};
 var $elm$core$Dict$sizeHelp = F2(
 	function (n, dict) {
 		sizeHelp:
@@ -7992,6 +8185,13 @@ var $elm$html$Html$Attributes$size = function (n) {
 		'size',
 		$elm$core$String$fromInt(n));
 };
+var $elm$html$Html$Attributes$stringProperty = F2(
+	function (key, string) {
+		return A2(
+			_VirtualDom_property,
+			key,
+			$elm$json$Json$Encode$string(string));
+	});
 var $elm$html$Html$Attributes$src = function (url) {
 	return A2(
 		$elm$html$Html$Attributes$stringProperty,
@@ -8002,8 +8202,31 @@ var $elm$virtual_dom$VirtualDom$style = _VirtualDom_style;
 var $elm$html$Html$Attributes$style = $elm$virtual_dom$VirtualDom$style;
 var $elm$html$Html$Attributes$type_ = $elm$html$Html$Attributes$stringProperty('type');
 var $elm$html$Html$Attributes$value = $elm$html$Html$Attributes$stringProperty('value');
+var $elm$core$Dict$values = function (dict) {
+	return A3(
+		$elm$core$Dict$foldr,
+		F3(
+			function (key, value, valueList) {
+				return A2($elm$core$List$cons, value, valueList);
+			}),
+		_List_Nil,
+		dict);
+};
 var $author$project$Main$view = function (model) {
+	var now = (($elm$time$Time$posixToMillis(model.clock) * 60) / 1000) | 0;
 	var isConnected = A2($billstclair$elm_websocket_client$PortFunnel$WebSocket$isConnected, model.key, model.state.websocket);
+	var frameCount = A2($elm$core$Maybe$withDefault, 1, model.frameCount);
+	var thisFrame = A2($elm$core$Basics$modBy, frameCount, now);
+	var bestFrame = $elm$core$List$head(
+		$elm$core$List$reverse(
+			$elm$core$Dict$values(
+				A2(
+					$elm$core$Dict$filter,
+					F2(
+						function (x, _v1) {
+							return _Utils_cmp(x, thisFrame) < 1;
+						}),
+					model.frames))));
 	return A2(
 		$elm$html$Html$div,
 		_List_fromArray(
@@ -8060,13 +8283,24 @@ var $author$project$Main$view = function (model) {
 								$elm$html$Html$text('Connect')
 							])),
 						$author$project$Main$br,
-						A2(
-						$elm$html$Html$img,
-						_List_fromArray(
-							[
-								$elm$html$Html$Attributes$src('/tmp/0.svg')
-							]),
-						_List_Nil),
+						$author$project$Main$b('Frame: '),
+						$elm$html$Html$text(
+						$elm$core$String$fromInt(thisFrame)),
+						$author$project$Main$br,
+						function () {
+						if (bestFrame.$ === 'Nothing') {
+							return $author$project$Main$b('no frames yet');
+						} else {
+							var path = bestFrame.a;
+							return A2(
+								$elm$html$Html$img,
+								_List_fromArray(
+									[
+										$elm$html$Html$Attributes$src(path)
+									]),
+								_List_Nil);
+						}
+					}(),
 						$author$project$Main$b('Status: '),
 						$elm$html$Html$text(model.status),
 						$author$project$Main$br,
@@ -8109,48 +8343,7 @@ var $author$project$Main$view = function (model) {
 							$elm$core$List$intersperse,
 							$author$project$Main$br,
 							A2($elm$core$List$map, $elm$html$Html$text, model.log))
-						]))),
-				A2(
-				$elm$html$Html$div,
-				_List_Nil,
-				_List_fromArray(
-					[
-						$author$project$Main$b('Instructions:'),
-						$author$project$Main$docp('Fill in the \'url\' and click \'Connect\' to connect to a real server.' + ' This will only work if you\'ve connected the port JavaScript code.'),
-						$author$project$Main$docp('Fill in the text and click \'Send\' to send a message.'),
-						$author$project$Main$docp('Click \'Close\' to close the connection.'),
-						$author$project$Main$docp('If the \'use simulator\' checkbox is checked at startup,' + (' then you\'re either runing from \'elm reactor\' or' + ' the JavaScript code got an error starting.')),
-						$author$project$Main$docp('Uncheck the \'auto reopen\' checkbox to report when the' + (' connection is lost unexpectedly, rather than the deault' + ' of attempting to reconnect.'))
-					])),
-				A2(
-				$elm$html$Html$p,
-				_List_Nil,
-				_List_fromArray(
-					[
-						$author$project$Main$b('Package: '),
-						A2(
-						$elm$html$Html$a,
-						_List_fromArray(
-							[
-								$elm$html$Html$Attributes$href('https://package.elm-lang.org/packages/billstclair/elm-websocket-client/latest')
-							]),
-						_List_fromArray(
-							[
-								$elm$html$Html$text('billstclair/elm-websocket-client')
-							])),
-						$author$project$Main$br,
-						$author$project$Main$b('GitHub: '),
-						A2(
-						$elm$html$Html$a,
-						_List_fromArray(
-							[
-								$elm$html$Html$Attributes$href('https://github.com/billstclair/elm-websocket-client')
-							]),
-						_List_fromArray(
-							[
-								$elm$html$Html$text('github.com/billstclair/elm-websocket-client')
-							]))
-					]))
+						])))
 			]));
 };
 var $author$project$Main$main = $elm$browser$Browser$element(

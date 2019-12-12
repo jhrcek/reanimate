@@ -13,7 +13,9 @@ import Json.Encode exposing (Value)
 import PortFunnel.WebSocket as WebSocket exposing (Response(..))
 import PortFunnels exposing (FunnelDict, Handler(..), State)
 import Html.Parser
-
+import Platform.Sub
+import Time exposing (Posix, posixToMillis, millisToPosix)
+import Browser.Events
 
 {- This section contains boilerplate that you'll always need.
 
@@ -34,8 +36,9 @@ handlers =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions =
-    PortFunnels.subscriptions Process
+subscriptions model = Platform.Sub.batch
+    [ PortFunnels.subscriptions Process model
+    , Browser.Events.onAnimationFrame NewClock ]
 
 
 funnelDict : FunnelDict Model Msg
@@ -78,6 +81,7 @@ type alias Model =
     , frameCount : Maybe Int
     , status : String
     , frames : Dict Int String
+    , clock : Posix
     }
 
 
@@ -103,6 +107,7 @@ init _ =
     , frameCount = Nothing
     , status = "Not connected"
     , frames = Dict.empty
+    , clock = millisToPosix 0
     }
         |> withNoCmd
 
@@ -120,6 +125,7 @@ type Msg
     | Close
     | Send
     | Process Value
+    | NewClock Posix
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -201,6 +207,9 @@ update msg model =
 
                 Ok res ->
                     res
+        
+        NewClock clock ->
+           { model | clock = clock } |> withNoCmd
 
 
 send : Model -> WebSocket.Message -> Cmd Msg
@@ -259,14 +268,15 @@ socketHandler response state mdl =
 
         WebSocket.ClosedResponse { code, wasClean, expected } ->
             { model
-                | log =
+                | frameCount = Nothing
+                , log =
                     ("Closed, " ++ closedString code wasClean expected)
                         :: model.log
             }
                 |> withNoCmd
 
         WebSocket.ErrorResponse error ->
-            { model | log = WebSocket.errorToString error :: model.log }
+            { model | frameCount = Nothing, log = WebSocket.errorToString error :: model.log }
                 |> withNoCmd
 
         _ ->
@@ -327,6 +337,10 @@ view model =
     let
         isConnected =
             WebSocket.isConnected model.key model.state.websocket
+        frameCount = Maybe.withDefault 1 model.frameCount
+        now = (posixToMillis model.clock * 60) // 1000
+        thisFrame = modBy frameCount now
+        bestFrame = List.head (List.reverse (Dict.values (Dict.filter (\x _ -> x <= thisFrame) model.frames)))
     in
     div
         [ style "width" "40em"
@@ -354,7 +368,12 @@ view model =
                 button [ onClick Connect ]
                     [ text "Connect" ]
             , br
-            , img [src "/tmp/0.svg"] []
+            , b "Frame: "
+            , text (String.fromInt thisFrame)
+            , br
+            , case bestFrame of
+                Nothing -> b "no frames yet"
+                Just path -> img [src path] []
             ,  b "Status: "
             , text model.status
             , br
@@ -382,29 +401,4 @@ view model =
                   ]
                 , List.intersperse br (List.map text model.log)
                 ]
-        , div []
-            [ b "Instructions:"
-            , docp <|
-                "Fill in the 'url' and click 'Connect' to connect to a real server."
-                    ++ " This will only work if you've connected the port JavaScript code."
-            , docp "Fill in the text and click 'Send' to send a message."
-            , docp "Click 'Close' to close the connection."
-            , docp <|
-                "If the 'use simulator' checkbox is checked at startup,"
-                    ++ " then you're either runing from 'elm reactor' or"
-                    ++ " the JavaScript code got an error starting."
-            , docp <|
-                "Uncheck the 'auto reopen' checkbox to report when the"
-                    ++ " connection is lost unexpectedly, rather than the deault"
-                    ++ " of attempting to reconnect."
-            ]
-        , p []
-            [ b "Package: "
-            , a [ href "https://package.elm-lang.org/packages/billstclair/elm-websocket-client/latest" ]
-                [ text "billstclair/elm-websocket-client" ]
-            , br
-            , b "GitHub: "
-            , a [ href "https://github.com/billstclair/elm-websocket-client" ]
-                [ text "github.com/billstclair/elm-websocket-client" ]
-            ]
         ]

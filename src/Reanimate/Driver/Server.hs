@@ -15,11 +15,12 @@ import qualified Data.Text.IO            as T
 import qualified Data.Text.Read          as T
 import           GHC.Environment         (getFullArgs)
 import           Network.WebSockets
+import Data.Hashable (hash)
 import           Paths_reanimate
 import           Reanimate.Misc          (runCmdLazy, runCmd_)
 import           System.Directory        (doesFileExist, findFile,
                                           listDirectory, makeAbsolute,
-                                          withCurrentDirectory)
+                                          withCurrentDirectory, removeDirectoryRecursive, createDirectoryIfMissing)
 import           System.Environment      (getProgName)
 import           System.Exit
 import           System.FilePath
@@ -53,13 +54,14 @@ serve = withManager $ \watch -> do
       then do
         putStrLn "Already connected to browser. Rejecting."
         rejectRequestWith pending defaultRejectRequest
-      else do
+      else withSystemTempDirectory "reanimate-svgs" $ \tmpDir -> do
+        createDirectoryIfMissing True tmpDir
         conn <- acceptRequest pending
         slave <- newEmptyMVar
         let handler = modifyMVar_ slave $ \tid -> do
               putStrLn "Reloading code..."
               killThread tid
-              forkIO $ ignoreErrors $ slaveHandler conn self
+              forkIO $ ignoreErrors $ slaveHandler conn self tmpDir
             killSlave = do
               tid <- takeMVar slave
               killThread tid
@@ -71,7 +73,7 @@ serve = withManager $ \watch -> do
               _msg <- receiveData conn :: IO T.Text
               handler
               loop
-        loop `finally` (swapMVar hasConnectionVar False >> stop >> killSlave)
+        loop `finally` (removeDirectoryRecursive tmpDir >> swapMVar hasConnectionVar False >> stop >> killSlave)
 
 ignoreErrors :: IO () -> IO ()
 ignoreErrors action = action `catch` \(_::SomeException) -> return ()
@@ -85,8 +87,8 @@ openViewer = do
       then putStrLn "Browser opened."
       else hPutStrLn stderr $ "Failed to open browser. Manually visit: " ++ url
 
-slaveHandler :: Connection -> FilePath -> IO ()
-slaveHandler conn self =
+slaveHandler :: Connection -> FilePath -> FilePath -> IO ()
+slaveHandler conn self svgDir =
   withCurrentDirectory (takeDirectory self) $
   withSystemTempDirectory "reanimate" $ \tmpDir ->
   withTempFile tmpDir "reanimate.exe" $ \tmpExecutable handle -> do
@@ -101,7 +103,7 @@ slaveHandler conn self =
         sendTextData conn (T.pack $ "frame_count\n" ++ show frameCount)
         fix $ \loop -> do
           (frameIdx, frame) <- expectFrame =<< getFrame
-          let fileName = "/tmp/" ++ show frameIdx ++ ".svg"
+          let fileName = svgDir </> show (hash frame) <.> "svg"
           T.writeFile fileName frame
           sendTextData conn (T.pack $ "frame\n" ++ show frameIdx ++ "\n" ++ fileName)
           loop
