@@ -4,29 +4,17 @@ module Main exposing (main)
 -}
 
 import Browser
-import Cmd.Extra exposing (addCmd, addCmds, withCmd, withCmds, withNoCmd)
+import Browser.Events
+import Cmd.Extra exposing (withCmd, withNoCmd)
 import Dict exposing (Dict)
-import Html exposing (Html, a, button, div, h1, input, p, span, text, img)
-import Html.Attributes exposing (checked, disabled, href, size, style, type_, value, src)
+import Html exposing (Html, button, div, h1, img, input, p, text)
+import Html.Attributes exposing (checked, disabled, size, src, style, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Json.Encode exposing (Value)
+import Platform.Sub
 import PortFunnel.WebSocket as WebSocket exposing (Response(..))
 import PortFunnels exposing (FunnelDict, Handler(..), State)
-import Html.Parser
-import Platform.Sub
-import Time exposing (Posix, posixToMillis, millisToPosix)
-import Browser.Events
-
-{- This section contains boilerplate that you'll always need.
-
-   First, copy PortFunnels.elm into your project, and modify it
-   to support all the funnel modules you use.
-
-   Then update the `handlers` list with an entry for each funnel.
-
-   Those handler functions are the meat of your interaction with each
-   funnel module.
--}
+import Time exposing (Posix, millisToPosix, posixToMillis)
 
 
 handlers : List (Handler Model Msg)
@@ -36,28 +24,16 @@ handlers =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions model = Platform.Sub.batch
-    [ PortFunnels.subscriptions Process model
-    , Browser.Events.onAnimationFrame NewClock ]
+subscriptions _ =
+    Platform.Sub.batch
+        [ PortFunnels.subPort Process
+        , Browser.Events.onAnimationFrame NewClock
+        ]
 
 
 funnelDict : FunnelDict Model Msg
 funnelDict =
-    PortFunnels.makeFunnelDict handlers getCmdPort
-
-
-{-| Get a possibly simulated output port.
--}
-getCmdPort : String -> Model -> (Value -> Cmd Msg)
-getCmdPort moduleName model =
-    PortFunnels.getCmdPort Process moduleName model.useSimulator
-
-
-{-| The real output port.
--}
-cmdPort : Value -> Cmd Msg
-cmdPort =
-    PortFunnels.getCmdPort Process "" False
+    PortFunnels.makeFunnelDict handlers PortFunnels.cmdPort
 
 
 
@@ -73,7 +49,6 @@ type alias Model =
     { send : String
     , log : List String
     , url : String
-    , useSimulator : Bool
     , wasLoaded : Bool
     , state : State
     , key : String
@@ -85,6 +60,7 @@ type alias Model =
     }
 
 
+main : Program () Model Msg
 main =
     Browser.element
         { init = init
@@ -99,7 +75,6 @@ init _ =
     { send = "Hello World!"
     , log = []
     , url = defaultUrl
-    , useSimulator = True
     , wasLoaded = False
     , state = PortFunnels.initialState
     , key = "socket"
@@ -117,13 +92,10 @@ init _ =
 
 
 type Msg
-    = UpdateSend String
-    | UpdateUrl String
-    | ToggleUseSimulator
+    = UpdateUrl String
     | ToggleAutoReopen
     | Connect
     | Close
-    | Send
     | Process Value
     | NewClock Posix
 
@@ -131,14 +103,8 @@ type Msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        UpdateSend newsend ->
-            { model | send = newsend } |> withNoCmd
-
         UpdateUrl url ->
             { model | url = url } |> withNoCmd
-
-        ToggleUseSimulator ->
-            { model | useSimulator = not model.useSimulator } |> withNoCmd
 
         ToggleAutoReopen ->
             let
@@ -164,39 +130,13 @@ update msg model =
                 |> withNoCmd
 
         Connect ->
-            { model
-                | log =
-                    (if model.useSimulator then
-                        "Connecting to simulator"
-
-                     else
-                        "Connecting to " ++ model.url
-                    )
-                        :: model.log
-            }
-                |> withCmd
-                    (WebSocket.makeOpenWithKey model.key model.url
-                        |> send model
-                    )
-
-        Send ->
-            { model
-                | log =
-                    ("Sending \"" ++ model.send ++ "\"") :: model.log
-            }
-                |> withCmd
-                    (WebSocket.makeSend model.key model.send
-                        |> send model
-                    )
+            model
+                |> logMessage ("Connecting to " ++ model.url)
+                |> withCmd (WebSocket.makeOpenWithKey model.key model.url |> send)
 
         Close ->
-            { model
-                | log = "Closing" :: model.log
-            }
-                |> withCmd
-                    (WebSocket.makeClose model.key
-                        |> send model
-                    )
+            { model | log = "Closing" :: model.log }
+                |> withCmd (WebSocket.makeClose model.key |> send)
 
         Process value ->
             case
@@ -207,23 +147,20 @@ update msg model =
 
                 Ok res ->
                     res
-        
+
         NewClock clock ->
-           { model | clock = clock } |> withNoCmd
+            { model | clock = clock } |> withNoCmd
 
 
-send : Model -> WebSocket.Message -> Cmd Msg
-send model message =
-    WebSocket.send (getCmdPort WebSocket.moduleName model) message
+send : WebSocket.Message -> Cmd Msg
+send message =
+    WebSocket.send PortFunnels.cmdPort message
 
 
 doIsLoaded : Model -> Model
 doIsLoaded model =
     if not model.wasLoaded && WebSocket.isLoaded model.state.websocket then
-        { model
-            | useSimulator = False
-            , wasLoaded = True
-        }
+        { model | wasLoaded = True }
 
     else
         model
@@ -241,56 +178,58 @@ socketHandler response state mdl =
     in
     case response of
         WebSocket.MessageReceivedResponse { message } ->
-          case String.lines message of
-            [ "status", status] ->
-              { model | status = status }
-                  |> withNoCmd
-            [ "frame_count", n] ->
-              { model | frameCount = String.toInt n }
-                  |> withNoCmd
-            [ "frame", n, svg] ->
-              let nth = Maybe.withDefault 0 (String.toInt n) in
-              { model | frames = Dict.insert nth svg model.frames }
-                  |> withNoCmd
-            _ ->
-              { model | log = ("Received \"" ++ message ++ "\"") :: model.log }
-                  |> withNoCmd
-            -- Just i ->
-            --   { model | frameCount = Just i }
-            --       |> withNoCmd
-        -- WebSocket.MessageReceivedResponse { message } ->
-        --     { model | log = ("Received \"" ++ message ++ "\"") :: model.log }
-        --         |> withNoCmd
+            ( case String.lines message of
+                [ "status", status ] ->
+                    { model | status = status }
+
+                [ "frame_count", n ] ->
+                    { model | frameCount = String.toInt n }
+
+                [ "frame", n, svg ] ->
+                    let
+                        nth =
+                            Maybe.withDefault 0 (String.toInt n)
+                    in
+                    { model | frames = Dict.insert nth svg model.frames }
+
+                _ ->
+                    model
+                        |> logMessage ("Received \"" ++ message ++ "\"")
+            , Cmd.none
+            )
 
         WebSocket.ConnectedResponse r ->
-            { model | log = ("Connected: " ++ r.description) :: model.log }
+            model
+                |> logMessage ("Connected: " ++ r.description)
                 |> withNoCmd
 
         WebSocket.ClosedResponse { code, wasClean, expected } ->
-            { model
-                | frameCount = Nothing
-                , log =
-                    ("Closed, " ++ closedString code wasClean expected)
-                        :: model.log
-            }
+            { model | frameCount = Nothing }
+                |> logMessage ("Closed, " ++ closedString code wasClean expected)
                 |> withNoCmd
 
         WebSocket.ErrorResponse error ->
-            { model | frameCount = Nothing, log = WebSocket.errorToString error :: model.log }
+            { model | frameCount = Nothing }
+                |> logMessage (WebSocket.errorToString error)
                 |> withNoCmd
 
         _ ->
-            case WebSocket.reconnectedResponses response of
+            ( case WebSocket.reconnectedResponses response of
                 [] ->
-                    model |> withNoCmd
+                    model
 
                 [ ReconnectedResponse r ] ->
-                    { model | log = ("Reconnected: " ++ r.description) :: model.log }
-                        |> withNoCmd
+                    logMessage ("Reconnected: " ++ r.description) model
 
                 list ->
-                    { model | log = Debug.toString list :: model.log }
-                        |> withNoCmd
+                    logMessage (Debug.toString list) model
+            , Cmd.none
+            )
+
+
+logMessage : String -> Model -> Model
+logMessage msg model =
+    { model | log = msg :: model.log }
 
 
 closedString : WebSocket.ClosedCode -> Bool -> Bool -> String
@@ -327,20 +266,23 @@ br =
     Html.br [] []
 
 
-docp : String -> Html Msg
-docp string =
-    p [] [ text string ]
-
-
 view : Model -> Html Msg
 view model =
     let
         isConnected =
             WebSocket.isConnected model.key model.state.websocket
-        frameCount = Maybe.withDefault 1 model.frameCount
-        now = (posixToMillis model.clock * 60) // 1000
-        thisFrame = modBy frameCount now
-        bestFrame = List.head (List.reverse (Dict.values (Dict.filter (\x _ -> x <= thisFrame) model.frames)))
+
+        frameCount =
+            Maybe.withDefault 1 model.frameCount
+
+        now =
+            (posixToMillis model.clock * 60) // 1000
+
+        thisFrame =
+            modBy frameCount now
+
+        bestFrame =
+            List.head (List.reverse (Dict.values (Dict.filter (\x _ -> x <= thisFrame) model.frames)))
     in
     div
         [ style "width" "40em"
@@ -372,9 +314,12 @@ view model =
             , text (String.fromInt thisFrame)
             , br
             , case bestFrame of
-                Nothing -> b "no frames yet"
-                Just path -> img [src path] []
-            ,  b "Status: "
+                Nothing ->
+                    b "no frames yet"
+
+                Just path ->
+                    img [ src path ] []
+            , b "Status: "
             , text model.status
             , br
             , b "Fetched frames: "

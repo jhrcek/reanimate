@@ -96,12 +96,6 @@ function _Utils_eq(x, y)
 
 function _Utils_eqHelp(x, y, depth, stack)
 {
-	if (depth > 100)
-	{
-		stack.push(_Utils_Tuple2(x,y));
-		return true;
-	}
-
 	if (x === y)
 	{
 		return true;
@@ -111,6 +105,12 @@ function _Utils_eqHelp(x, y, depth, stack)
 	{
 		typeof x === 'function' && _Debug_crash(5);
 		return false;
+	}
+
+	if (depth > 100)
+	{
+		stack.push(_Utils_Tuple2(x,y));
+		return true;
 	}
 
 	/**/
@@ -171,7 +171,7 @@ function _Utils_cmp(x, y, ord)
 	//*/
 
 	/**_UNUSED/
-	if (!x.$)
+	if (typeof x.$ === 'undefined')
 	//*/
 	/**/
 	if (x.$[0] === '#')
@@ -633,6 +633,16 @@ function _Debug_toAnsiString(ansi, value)
 		return _Debug_ctorColor(ansi, tag) + output;
 	}
 
+	if (typeof DataView === 'function' && value instanceof DataView)
+	{
+		return _Debug_stringColor(ansi, '<' + value.byteLength + ' bytes>');
+	}
+
+	if (typeof File !== 'undefined' && value instanceof File)
+	{
+		return _Debug_internalColor(ansi, '<' + value.name + '>');
+	}
+
 	if (typeof value === 'object')
 	{
 		var output = [];
@@ -698,9 +708,13 @@ function _Debug_fadeColor(ansi, string)
 
 function _Debug_internalColor(ansi, string)
 {
-	return ansi ? '\x1b[94m' + string + '\x1b[0m' : string;
+	return ansi ? '\x1b[36m' + string + '\x1b[0m' : string;
 }
 
+function _Debug_toHexDigit(n)
+{
+	return String.fromCharCode(n < 10 ? 48 + n : 55 + n);
+}
 
 
 // CRASH
@@ -847,7 +861,7 @@ var _String_cons = F2(function(chr, str)
 function _String_uncons(string)
 {
 	var word = string.charCodeAt(0);
-	return word
+	return !isNaN(word)
 		? $elm$core$Maybe$Just(
 			0xD800 <= word && word <= 0xDBFF
 				? _Utils_Tuple2(_Utils_chr(string[0] + string[1]), string.slice(2))
@@ -1171,9 +1185,7 @@ function _Char_fromCode(code)
 			? String.fromCharCode(code)
 			:
 		(code -= 0x10000,
-			String.fromCharCode(Math.floor(code / 0x400) + 0xD800)
-			+
-			String.fromCharCode(code % 0x400 + 0xDC00)
+			String.fromCharCode(Math.floor(code / 0x400) + 0xD800, code % 0x400 + 0xDC00)
 		)
 	);
 }
@@ -1226,21 +1238,56 @@ function _Json_fail(msg)
 	};
 }
 
-var _Json_decodeInt = { $: 2 };
-var _Json_decodeBool = { $: 3 };
-var _Json_decodeFloat = { $: 4 };
-var _Json_decodeValue = { $: 5 };
-var _Json_decodeString = { $: 6 };
+function _Json_decodePrim(decoder)
+{
+	return { $: 2, b: decoder };
+}
 
-function _Json_decodeList(decoder) { return { $: 7, b: decoder }; }
-function _Json_decodeArray(decoder) { return { $: 8, b: decoder }; }
+var _Json_decodeInt = _Json_decodePrim(function(value) {
+	return (typeof value !== 'number')
+		? _Json_expecting('an INT', value)
+		:
+	(-2147483647 < value && value < 2147483647 && (value | 0) === value)
+		? $elm$core$Result$Ok(value)
+		:
+	(isFinite(value) && !(value % 1))
+		? $elm$core$Result$Ok(value)
+		: _Json_expecting('an INT', value);
+});
 
-function _Json_decodeNull(value) { return { $: 9, c: value }; }
+var _Json_decodeBool = _Json_decodePrim(function(value) {
+	return (typeof value === 'boolean')
+		? $elm$core$Result$Ok(value)
+		: _Json_expecting('a BOOL', value);
+});
+
+var _Json_decodeFloat = _Json_decodePrim(function(value) {
+	return (typeof value === 'number')
+		? $elm$core$Result$Ok(value)
+		: _Json_expecting('a FLOAT', value);
+});
+
+var _Json_decodeValue = _Json_decodePrim(function(value) {
+	return $elm$core$Result$Ok(_Json_wrap(value));
+});
+
+var _Json_decodeString = _Json_decodePrim(function(value) {
+	return (typeof value === 'string')
+		? $elm$core$Result$Ok(value)
+		: (value instanceof String)
+			? $elm$core$Result$Ok(value + '')
+			: _Json_expecting('a STRING', value);
+});
+
+function _Json_decodeList(decoder) { return { $: 3, b: decoder }; }
+function _Json_decodeArray(decoder) { return { $: 4, b: decoder }; }
+
+function _Json_decodeNull(value) { return { $: 5, c: value }; }
 
 var _Json_decodeField = F2(function(field, decoder)
 {
 	return {
-		$: 10,
+		$: 6,
 		d: field,
 		b: decoder
 	};
@@ -1249,7 +1296,7 @@ var _Json_decodeField = F2(function(field, decoder)
 var _Json_decodeIndex = F2(function(index, decoder)
 {
 	return {
-		$: 11,
+		$: 7,
 		e: index,
 		b: decoder
 	};
@@ -1258,7 +1305,7 @@ var _Json_decodeIndex = F2(function(index, decoder)
 function _Json_decodeKeyValuePairs(decoder)
 {
 	return {
-		$: 12,
+		$: 8,
 		b: decoder
 	};
 }
@@ -1266,7 +1313,7 @@ function _Json_decodeKeyValuePairs(decoder)
 function _Json_mapMany(f, decoders)
 {
 	return {
-		$: 13,
+		$: 9,
 		f: f,
 		g: decoders
 	};
@@ -1275,7 +1322,7 @@ function _Json_mapMany(f, decoders)
 var _Json_andThen = F2(function(callback, decoder)
 {
 	return {
-		$: 14,
+		$: 10,
 		b: decoder,
 		h: callback
 	};
@@ -1284,7 +1331,7 @@ var _Json_andThen = F2(function(callback, decoder)
 function _Json_oneOf(decoders)
 {
 	return {
-		$: 15,
+		$: 11,
 		g: decoders
 	};
 }
@@ -1357,61 +1404,29 @@ function _Json_runHelp(decoder, value)
 {
 	switch (decoder.$)
 	{
-		case 3:
-			return (typeof value === 'boolean')
-				? $elm$core$Result$Ok(value)
-				: _Json_expecting('a BOOL', value);
-
 		case 2:
-			if (typeof value !== 'number') {
-				return _Json_expecting('an INT', value);
-			}
+			return decoder.b(value);
 
-			if (-2147483647 < value && value < 2147483647 && (value | 0) === value) {
-				return $elm$core$Result$Ok(value);
-			}
-
-			if (isFinite(value) && !(value % 1)) {
-				return $elm$core$Result$Ok(value);
-			}
-
-			return _Json_expecting('an INT', value);
-
-		case 4:
-			return (typeof value === 'number')
-				? $elm$core$Result$Ok(value)
-				: _Json_expecting('a FLOAT', value);
-
-		case 6:
-			return (typeof value === 'string')
-				? $elm$core$Result$Ok(value)
-				: (value instanceof String)
-					? $elm$core$Result$Ok(value + '')
-					: _Json_expecting('a STRING', value);
-
-		case 9:
+		case 5:
 			return (value === null)
 				? $elm$core$Result$Ok(decoder.c)
 				: _Json_expecting('null', value);
 
-		case 5:
-			return $elm$core$Result$Ok(_Json_wrap(value));
-
-		case 7:
-			if (!Array.isArray(value))
+		case 3:
+			if (!_Json_isArray(value))
 			{
 				return _Json_expecting('a LIST', value);
 			}
 			return _Json_runArrayDecoder(decoder.b, value, _List_fromArray);
 
-		case 8:
-			if (!Array.isArray(value))
+		case 4:
+			if (!_Json_isArray(value))
 			{
 				return _Json_expecting('an ARRAY', value);
 			}
 			return _Json_runArrayDecoder(decoder.b, value, _Json_toElmArray);
 
-		case 10:
+		case 6:
 			var field = decoder.d;
 			if (typeof value !== 'object' || value === null || !(field in value))
 			{
@@ -1420,9 +1435,9 @@ function _Json_runHelp(decoder, value)
 			var result = _Json_runHelp(decoder.b, value[field]);
 			return ($elm$core$Result$isOk(result)) ? result : $elm$core$Result$Err(A2($elm$json$Json$Decode$Field, field, result.a));
 
-		case 11:
+		case 7:
 			var index = decoder.e;
-			if (!Array.isArray(value))
+			if (!_Json_isArray(value))
 			{
 				return _Json_expecting('an ARRAY', value);
 			}
@@ -1433,8 +1448,8 @@ function _Json_runHelp(decoder, value)
 			var result = _Json_runHelp(decoder.b, value[index]);
 			return ($elm$core$Result$isOk(result)) ? result : $elm$core$Result$Err(A2($elm$json$Json$Decode$Index, index, result.a));
 
-		case 12:
-			if (typeof value !== 'object' || value === null || Array.isArray(value))
+		case 8:
+			if (typeof value !== 'object' || value === null || _Json_isArray(value))
 			{
 				return _Json_expecting('an OBJECT', value);
 			}
@@ -1455,7 +1470,7 @@ function _Json_runHelp(decoder, value)
 			}
 			return $elm$core$Result$Ok($elm$core$List$reverse(keyValuePairs));
 
-		case 13:
+		case 9:
 			var answer = decoder.f;
 			var decoders = decoder.g;
 			for (var i = 0; i < decoders.length; i++)
@@ -1469,13 +1484,13 @@ function _Json_runHelp(decoder, value)
 			}
 			return $elm$core$Result$Ok(answer);
 
-		case 14:
+		case 10:
 			var result = _Json_runHelp(decoder.b, value);
 			return (!$elm$core$Result$isOk(result))
 				? result
 				: _Json_runHelp(decoder.h(result.a), value);
 
-		case 15:
+		case 11:
 			var errors = _List_Nil;
 			for (var temp = decoder.g; temp.b; temp = temp.b) // WHILE_CONS
 			{
@@ -1512,6 +1527,11 @@ function _Json_runArrayDecoder(decoder, value, toElmValue)
 	return $elm$core$Result$Ok(toElmValue(array));
 }
 
+function _Json_isArray(value)
+{
+	return Array.isArray(value) || (typeof FileList !== 'undefined' && value instanceof FileList);
+}
+
 function _Json_toElmArray(array)
 {
 	return A2($elm$core$Array$initialize, array.length, function(i) { return array[i]; });
@@ -1543,34 +1563,30 @@ function _Json_equality(x, y)
 		case 1:
 			return x.a === y.a;
 
-		case 3:
 		case 2:
-		case 4:
-		case 6:
-		case 5:
-			return true;
+			return x.b === y.b;
 
-		case 9:
+		case 5:
 			return x.c === y.c;
 
-		case 7:
+		case 3:
+		case 4:
 		case 8:
-		case 12:
 			return _Json_equality(x.b, y.b);
 
-		case 10:
+		case 6:
 			return x.d === y.d && _Json_equality(x.b, y.b);
 
-		case 11:
+		case 7:
 			return x.e === y.e && _Json_equality(x.b, y.b);
 
-		case 13:
+		case 9:
 			return x.f === y.f && _Json_listEquality(x.g, y.g);
 
-		case 14:
+		case 10:
 			return x.h === y.h && _Json_equality(x.b, y.b);
 
-		case 15:
+		case 11:
 			return _Json_listEquality(x.g, y.g);
 	}
 }
@@ -1867,10 +1883,10 @@ function _Platform_initialize(flagDecoder, args, init, update, subscriptions, st
 	{
 		result = A2(update, msg, model);
 		stepper(model = result.a, viewMetadata);
-		_Platform_dispatchEffects(managers, result.b, subscriptions(model));
+		_Platform_enqueueEffects(managers, result.b, subscriptions(model));
 	}
 
-	_Platform_dispatchEffects(managers, result.b, subscriptions(model));
+	_Platform_enqueueEffects(managers, result.b, subscriptions(model));
 
 	return ports ? { ports: ports } : {};
 }
@@ -2028,6 +2044,51 @@ var _Platform_map = F2(function(tagger, bag)
 
 
 // PIPE BAGS INTO EFFECT MANAGERS
+//
+// Effects must be queued!
+//
+// Say your init contains a synchronous command, like Time.now or Time.here
+//
+//   - This will produce a batch of effects (FX_1)
+//   - The synchronous task triggers the subsequent `update` call
+//   - This will produce a batch of effects (FX_2)
+//
+// If we just start dispatching FX_2, subscriptions from FX_2 can be processed
+// before subscriptions from FX_1. No good! Earlier versions of this code had
+// this problem, leading to these reports:
+//
+//   https://github.com/elm/core/issues/980
+//   https://github.com/elm/core/pull/981
+//   https://github.com/elm/compiler/issues/1776
+//
+// The queue is necessary to avoid ordering issues for synchronous commands.
+
+
+// Why use true/false here? Why not just check the length of the queue?
+// The goal is to detect "are we currently dispatching effects?" If we
+// are, we need to bail and let the ongoing while loop handle things.
+//
+// Now say the queue has 1 element. When we dequeue the final element,
+// the queue will be empty, but we are still actively dispatching effects.
+// So you could get queue jumping in a really tricky category of cases.
+//
+var _Platform_effectsQueue = [];
+var _Platform_effectsActive = false;
+
+
+function _Platform_enqueueEffects(managers, cmdBag, subBag)
+{
+	_Platform_effectsQueue.push({ p: managers, q: cmdBag, r: subBag });
+
+	if (_Platform_effectsActive) return;
+
+	_Platform_effectsActive = true;
+	for (var fx; fx = _Platform_effectsQueue.shift(); )
+	{
+		_Platform_dispatchEffects(fx.p, fx.q, fx.r);
+	}
+	_Platform_effectsActive = false;
+}
 
 
 function _Platform_dispatchEffects(managers, cmdBag, subBag)
@@ -2065,8 +2126,8 @@ function _Platform_gatherEffects(isCmd, bag, effectsDict, taggers)
 
 		case 3:
 			_Platform_gatherEffects(isCmd, bag.o, effectsDict, {
-				p: bag.n,
-				q: taggers
+				s: bag.n,
+				t: taggers
 			});
 			return;
 	}
@@ -2077,9 +2138,9 @@ function _Platform_toEffect(isCmd, home, taggers, value)
 {
 	function applyTaggers(x)
 	{
-		for (var temp = taggers; temp; temp = temp.q)
+		for (var temp = taggers; temp; temp = temp.t)
 		{
-			x = temp.p(x);
+			x = temp.s(x);
 		}
 		return x;
 	}
@@ -2126,7 +2187,7 @@ function _Platform_outgoingPort(name, converter)
 	_Platform_checkPortName(name);
 	_Platform_effectManagers[name] = {
 		e: _Platform_outgoingPortMap,
-		r: converter,
+		u: converter,
 		a: _Platform_setupOutgoingPort
 	};
 	return _Platform_leaf(name);
@@ -2139,7 +2200,7 @@ var _Platform_outgoingPortMap = F2(function(tagger, value) { return value; });
 function _Platform_setupOutgoingPort(name)
 {
 	var subs = [];
-	var converter = _Platform_effectManagers[name].r;
+	var converter = _Platform_effectManagers[name].u;
 
 	// CREATE MANAGER
 
@@ -2196,7 +2257,7 @@ function _Platform_incomingPort(name, converter)
 	_Platform_checkPortName(name);
 	_Platform_effectManagers[name] = {
 		f: _Platform_incomingPortMap,
-		r: converter,
+		u: converter,
 		a: _Platform_setupIncomingPort
 	};
 	return _Platform_leaf(name);
@@ -2215,7 +2276,7 @@ var _Platform_incomingPortMap = F2(function(tagger, finalTagger)
 function _Platform_setupIncomingPort(name, sendToApp)
 {
 	var subs = _List_Nil;
-	var converter = _Platform_effectManagers[name].r;
+	var converter = _Platform_effectManagers[name].u;
 
 	// CREATE MANAGER
 
@@ -2778,7 +2839,7 @@ function _VirtualDom_applyFacts(domNode, eventNode, facts)
 		key === 'a4'
 			? _VirtualDom_applyAttrsNS(domNode, value)
 			:
-		(key !== 'value' || key !== 'checked' || domNode[key] !== value) && (domNode[key] = value);
+		((key !== 'value' && key !== 'checked') || domNode[key] !== value) && (domNode[key] = value);
 	}
 }
 
@@ -2807,7 +2868,7 @@ function _VirtualDom_applyAttrs(domNode, attrs)
 	for (var key in attrs)
 	{
 		var value = attrs[key];
-		value
+		typeof value !== 'undefined'
 			? domNode.setAttribute(key, value)
 			: domNode.removeAttribute(key);
 	}
@@ -2826,7 +2887,7 @@ function _VirtualDom_applyAttrsNS(domNode, nsAttrs)
 		var namespace = pair.f;
 		var value = pair.o;
 
-		value
+		typeof value !== 'undefined'
 			? domNode.setAttributeNS(namespace, key, value)
 			: domNode.removeAttributeNS(namespace, key);
 	}
@@ -3289,6 +3350,9 @@ function _VirtualDom_diffKeyedKids(xParent, yParent, patches, rootIndex)
 		var xNode = x.b;
 		var yNode = y.b;
 
+		var newMatch = undefined;
+		var oldMatch = undefined;
+
 		// check if keys match
 
 		if (xKey === yKey)
@@ -3311,14 +3375,14 @@ function _VirtualDom_diffKeyedKids(xParent, yParent, patches, rootIndex)
 		{
 			var xNextKey = xNext.a;
 			var xNextNode = xNext.b;
-			var oldMatch = yKey === xNextKey;
+			oldMatch = yKey === xNextKey;
 		}
 
 		if (yNext)
 		{
 			var yNextKey = yNext.a;
 			var yNextNode = yNext.b;
-			var newMatch = xKey === yNextKey;
+			newMatch = xKey === yNextKey;
 		}
 
 
@@ -3853,6 +3917,7 @@ function _VirtualDom_dekey(keyedNode)
 
 
 
+
 // ELEMENT
 
 
@@ -3928,10 +3993,15 @@ var _Browser_document = _Debugger_document || F4(function(impl, flagDecoder, deb
 // ANIMATION
 
 
+var _Browser_cancelAnimationFrame =
+	typeof cancelAnimationFrame !== 'undefined'
+		? cancelAnimationFrame
+		: function(id) { clearTimeout(id); };
+
 var _Browser_requestAnimationFrame =
 	typeof requestAnimationFrame !== 'undefined'
 		? requestAnimationFrame
-		: function(callback) { setTimeout(callback, 1000 / 60); };
+		: function(callback) { return setTimeout(callback, 1000 / 60); };
 
 
 function _Browser_makeAnimator(model, draw)
@@ -3981,7 +4051,7 @@ function _Browser_application(impl)
 
 			return F2(function(domNode, event)
 			{
-				if (!event.ctrlKey && !event.metaKey && !event.shiftKey && event.button < 1 && !domNode.target && !domNode.download)
+				if (!event.ctrlKey && !event.metaKey && !event.shiftKey && event.button < 1 && !domNode.target && !domNode.hasAttribute('download'))
 				{
 					event.preventDefault();
 					var href = domNode.href;
@@ -4093,12 +4163,12 @@ function _Browser_rAF()
 {
 	return _Scheduler_binding(function(callback)
 	{
-		var id = requestAnimationFrame(function() {
+		var id = _Browser_requestAnimationFrame(function() {
 			callback(_Scheduler_succeed(Date.now()));
 		});
 
 		return function() {
-			cancelAnimationFrame(id);
+			_Browser_cancelAnimationFrame(id);
 		};
 	});
 }
@@ -5109,7 +5179,6 @@ var $author$project$Main$init = function (_v0) {
 			state: $author$project$PortFunnels$initialState,
 			status: 'Not connected',
 			url: $author$project$Main$defaultUrl,
-			useSimulator: true,
 			wasLoaded: false
 		});
 };
@@ -5252,52 +5321,185 @@ var $elm$browser$Browser$AnimationManager$onAnimationFrame = function (tagger) {
 var $elm$browser$Browser$Events$onAnimationFrame = $elm$browser$Browser$AnimationManager$onAnimationFrame;
 var $elm$json$Json$Decode$value = _Json_decodeValue;
 var $author$project$PortFunnels$subPort = _Platform_incomingPort('subPort', $elm$json$Json$Decode$value);
-var $author$project$PortFunnels$subscriptions = F2(
-	function (process, model) {
-		return $author$project$PortFunnels$subPort(process);
-	});
-var $author$project$Main$subscriptions = function (model) {
+var $author$project$Main$subscriptions = function (_v0) {
 	return $elm$core$Platform$Sub$batch(
 		_List_fromArray(
 			[
-				A2($author$project$PortFunnels$subscriptions, $author$project$Main$Process, model),
+				$author$project$PortFunnels$subPort($author$project$Main$Process),
 				$elm$browser$Browser$Events$onAnimationFrame($author$project$Main$NewClock)
 			]));
 };
 var $author$project$PortFunnels$cmdPort = _Platform_outgoingPort('cmdPort', $elm$core$Basics$identity);
-var $elm$core$Basics$compare = _Utils_compare;
-var $elm$core$Dict$get = F2(
-	function (targetKey, dict) {
-		get:
-		while (true) {
-			if (dict.$ === 'RBEmpty_elm_builtin') {
-				return $elm$core$Maybe$Nothing;
-			} else {
-				var key = dict.b;
-				var value = dict.c;
-				var left = dict.d;
-				var right = dict.e;
-				var _v1 = A2($elm$core$Basics$compare, targetKey, key);
-				switch (_v1.$) {
-					case 'LT':
-						var $temp$targetKey = targetKey,
-							$temp$dict = left;
-						targetKey = $temp$targetKey;
-						dict = $temp$dict;
-						continue get;
-					case 'EQ':
-						return $elm$core$Maybe$Just(value);
-					default:
-						var $temp$targetKey = targetKey,
-							$temp$dict = right;
-						targetKey = $temp$targetKey;
-						dict = $temp$dict;
-						continue get;
-				}
-			}
-		}
+var $author$project$PortFunnels$WebSocketHandler = function (a) {
+	return {$: 'WebSocketHandler', a: a};
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$closedCodeToString = function (code) {
+	switch (code.$) {
+		case 'NormalClosure':
+			return 'Normal';
+		case 'GoingAwayClosure':
+			return 'GoingAway';
+		case 'ProtocolErrorClosure':
+			return 'ProtocolError';
+		case 'UnsupportedDataClosure':
+			return 'UnsupportedData';
+		case 'NoStatusRecvdClosure':
+			return 'NoStatusRecvd';
+		case 'AbnormalClosure':
+			return 'Abnormal';
+		case 'InvalidFramePayloadDataClosure':
+			return 'InvalidFramePayloadData';
+		case 'PolicyViolationClosure':
+			return 'PolicyViolation';
+		case 'MessageTooBigClosure':
+			return 'MessageTooBig';
+		case 'MissingExtensionClosure':
+			return 'MissingExtension';
+		case 'InternalErrorClosure':
+			return 'InternalError';
+		case 'ServiceRestartClosure':
+			return 'ServiceRestart';
+		case 'TryAgainLaterClosure':
+			return 'TryAgainLater';
+		case 'BadGatewayClosure':
+			return 'BadGateway';
+		case 'TLSHandshakeClosure':
+			return 'TLSHandshake';
+		case 'TimedOutOnReconnect':
+			return 'TimedOutOnReconnect';
+		default:
+			return 'UnknownClosureCode';
+	}
+};
+var $author$project$Main$closedString = F3(
+	function (code, wasClean, expected) {
+		return 'code: ' + ($billstclair$elm_websocket_client$PortFunnel$WebSocket$closedCodeToString(code) + (', ' + ((wasClean ? 'clean' : 'not clean') + (', ' + (expected ? 'expected' : 'NOT expected')))));
 	});
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$isLoaded = function (_v0) {
+	var state = _v0.a;
+	return state.isLoaded;
+};
 var $elm$core$Basics$not = _Basics_not;
+var $author$project$Main$doIsLoaded = function (model) {
+	return ((!model.wasLoaded) && $billstclair$elm_websocket_client$PortFunnel$WebSocket$isLoaded(model.state.websocket)) ? _Utils_update(
+		model,
+		{wasLoaded: true}) : model;
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$maybeStringToString = function (string) {
+	if (string.$ === 'Nothing') {
+		return 'Nothing';
+	} else {
+		var s = string.a;
+		return 'Just \"' + (s + '\"');
+	}
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$maybeString = function (s) {
+	if (s.$ === 'Nothing') {
+		return 'Nothing';
+	} else {
+		var string = s.a;
+		return 'Just ' + string;
+	}
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$toString = function (mess) {
+	switch (mess.$) {
+		case 'Startup':
+			return '<Startup>';
+		case 'PWillOpen':
+			var key = mess.a.key;
+			var url = mess.a.url;
+			var keepAlive = mess.a.keepAlive;
+			return 'PWillOpen { key = \"' + (key + ('\", url = \"' + (url + ('\", keepAlive = ' + (keepAlive ? 'True' : ('False' + '}'))))));
+		case 'POOpen':
+			var key = mess.a.key;
+			var url = mess.a.url;
+			return 'POOpen { key = \"' + (key + ('\", url = \"' + (url + '\"}')));
+		case 'PIConnected':
+			var key = mess.a.key;
+			var description = mess.a.description;
+			return 'PIConnected { key = \"' + (key + ('\", description = \"' + (description + '\"}')));
+		case 'PWillSend':
+			var key = mess.a.key;
+			var message = mess.a.message;
+			return 'PWillSend { key = \"' + (key + ('\", message = \"' + (message + '\"}')));
+		case 'POSend':
+			var key = mess.a.key;
+			var message = mess.a.message;
+			return 'POSend { key = \"' + (key + ('\", message = \"' + (message + '\"}')));
+		case 'PIMessageReceived':
+			var key = mess.a.key;
+			var message = mess.a.message;
+			return 'PIMessageReceived { key = \"' + (key + ('\", message = \"' + (message + '\"}')));
+		case 'PWillClose':
+			var key = mess.a.key;
+			var reason = mess.a.reason;
+			return 'PWillClose { key = \"' + (key + ('\", reason = \"' + (reason + '\"}')));
+		case 'POClose':
+			var key = mess.a.key;
+			var reason = mess.a.reason;
+			return 'POClose { key = \"' + (key + ('\", reason = \"' + (reason + '\"}')));
+		case 'PIClosed':
+			var key = mess.a.key;
+			var bytesQueued = mess.a.bytesQueued;
+			var code = mess.a.code;
+			var reason = mess.a.reason;
+			var wasClean = mess.a.wasClean;
+			return 'PIClosed { key = \"' + (key + ('\", bytesQueued = \"' + ($elm$core$String$fromInt(bytesQueued) + ('\", code = \"' + ($elm$core$String$fromInt(code) + ('\", reason = \"' + (reason + ('\", wasClean = \"' + (wasClean ? 'True' : ('False' + '\"}'))))))))));
+		case 'POBytesQueued':
+			var key = mess.a.key;
+			return 'POBytesQueued { key = \"' + (key + '\"}');
+		case 'PIBytesQueued':
+			var key = mess.a.key;
+			var bufferedAmount = mess.a.bufferedAmount;
+			return 'PIBytesQueued { key = \"' + (key + ('\", bufferedAmount = \"' + ($elm$core$String$fromInt(bufferedAmount) + '\"}')));
+		case 'PODelay':
+			var millis = mess.a.millis;
+			var id = mess.a.id;
+			return 'PODelay { millis = \"' + ($elm$core$String$fromInt(millis) + ('\" id = \"' + (id + '\"}')));
+		case 'PIDelayed':
+			var id = mess.a.id;
+			return 'PIDelayed { id = \"' + (id + '\"}');
+		default:
+			var key = mess.a.key;
+			var code = mess.a.code;
+			var description = mess.a.description;
+			var name = mess.a.name;
+			return 'PIError { key = \"' + ($billstclair$elm_websocket_client$PortFunnel$WebSocket$maybeString(key) + ('\" code = \"' + (code + ('\" description = \"' + (description + ('\" name = \"' + ($billstclair$elm_websocket_client$PortFunnel$WebSocket$maybeString(name) + '\"}')))))));
+	}
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$errorToString = function (theError) {
+	switch (theError.$) {
+		case 'SocketAlreadyOpenError':
+			var key = theError.a;
+			return 'SocketAlreadyOpenError \"' + (key + '\"');
+		case 'SocketConnectingError':
+			var key = theError.a;
+			return 'SocketConnectingError \"' + (key + '\"');
+		case 'SocketClosingError':
+			var key = theError.a;
+			return 'SocketClosingError \"' + (key + '\"');
+		case 'SocketNotOpenError':
+			var key = theError.a;
+			return 'SocketNotOpenError \"' + (key + '\"');
+		case 'UnexpectedConnectedError':
+			var key = theError.a.key;
+			var description = theError.a.description;
+			return 'UnexpectedConnectedError\n { key = \"' + (key + ('\", description = \"' + (description + '\" }')));
+		case 'UnexpectedMessageError':
+			var key = theError.a.key;
+			var message = theError.a.message;
+			return 'UnexpectedMessageError { key = \"' + (key + ('\", message = \"' + (message + '\" }')));
+		case 'LowLevelError':
+			var key = theError.a.key;
+			var code = theError.a.code;
+			var description = theError.a.description;
+			var name = theError.a.name;
+			return 'LowLevelError { key = \"' + ($billstclair$elm_websocket_client$PortFunnel$WebSocket$maybeStringToString(key) + ('\", code = \"' + (code + ('\", description = \"' + (description + ('\", code = \"' + ($billstclair$elm_websocket_client$PortFunnel$WebSocket$maybeStringToString(name) + '\" }')))))));
+		default:
+			var message = theError.a.message;
+			return 'InvalidMessageError: ' + $billstclair$elm_websocket_client$PortFunnel$WebSocket$toString(message);
+	}
+};
 var $elm$core$Dict$Black = {$: 'Black'};
 var $elm$core$Dict$RBNode_elm_builtin = F5(
 	function (a, b, c, d, e) {
@@ -5358,6 +5560,7 @@ var $elm$core$Dict$balance = F5(
 			}
 		}
 	});
+var $elm$core$Basics$compare = _Utils_compare;
 var $elm$core$Dict$insertHelp = F3(
 	function (key, value, dict) {
 		if (dict.$ === 'RBEmpty_elm_builtin') {
@@ -5406,6 +5609,165 @@ var $elm$core$Dict$insert = F3(
 			return x;
 		}
 	});
+var $elm$core$String$lines = _String_lines;
+var $author$project$Main$logMessage = F2(
+	function (msg, model) {
+		return _Utils_update(
+			model,
+			{
+				log: A2($elm$core$List$cons, msg, model.log)
+			});
+	});
+var $elm$core$List$filter = F2(
+	function (isGood, list) {
+		return A3(
+			$elm$core$List$foldr,
+			F2(
+				function (x, xs) {
+					return isGood(x) ? A2($elm$core$List$cons, x, xs) : xs;
+				}),
+			_List_Nil,
+			list);
+	});
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$isReconnectedResponse = function (response) {
+	if (response.$ === 'ReconnectedResponse') {
+		return true;
+	} else {
+		return false;
+	}
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$reconnectedResponses = function (response) {
+	switch (response.$) {
+		case 'ReconnectedResponse':
+			return _List_fromArray(
+				[response]);
+		case 'ListResponse':
+			var list = response.a;
+			return A2($elm$core$List$filter, $billstclair$elm_websocket_client$PortFunnel$WebSocket$isReconnectedResponse, list);
+		default:
+			return _List_Nil;
+	}
+};
+var $elm$core$Debug$toString = _Debug_toString;
+var $elm$core$Maybe$withDefault = F2(
+	function (_default, maybe) {
+		if (maybe.$ === 'Just') {
+			var value = maybe.a;
+			return value;
+		} else {
+			return _default;
+		}
+	});
+var $author$project$Main$socketHandler = F3(
+	function (response, state, mdl) {
+		var model = $author$project$Main$doIsLoaded(
+			_Utils_update(
+				mdl,
+				{error: $elm$core$Maybe$Nothing, state: state}));
+		switch (response.$) {
+			case 'MessageReceivedResponse':
+				var message = response.a.message;
+				return _Utils_Tuple2(
+					function () {
+						var _v1 = $elm$core$String$lines(message);
+						_v1$3:
+						while (true) {
+							if (_v1.b && _v1.b.b) {
+								if (!_v1.b.b.b) {
+									switch (_v1.a) {
+										case 'status':
+											var _v2 = _v1.b;
+											var status = _v2.a;
+											return _Utils_update(
+												model,
+												{status: status});
+										case 'frame_count':
+											var _v3 = _v1.b;
+											var n = _v3.a;
+											return _Utils_update(
+												model,
+												{
+													frameCount: $elm$core$String$toInt(n)
+												});
+										default:
+											break _v1$3;
+									}
+								} else {
+									if ((_v1.a === 'frame') && (!_v1.b.b.b.b)) {
+										var _v4 = _v1.b;
+										var n = _v4.a;
+										var _v5 = _v4.b;
+										var svg = _v5.a;
+										var nth = A2(
+											$elm$core$Maybe$withDefault,
+											0,
+											$elm$core$String$toInt(n));
+										return _Utils_update(
+											model,
+											{
+												frames: A3($elm$core$Dict$insert, nth, svg, model.frames)
+											});
+									} else {
+										break _v1$3;
+									}
+								}
+							} else {
+								break _v1$3;
+							}
+						}
+						return A2($author$project$Main$logMessage, 'Received \"' + (message + '\"'), model);
+					}(),
+					$elm$core$Platform$Cmd$none);
+			case 'ConnectedResponse':
+				var r = response.a;
+				return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
+					A2($author$project$Main$logMessage, 'Connected: ' + r.description, model));
+			case 'ClosedResponse':
+				var code = response.a.code;
+				var wasClean = response.a.wasClean;
+				var expected = response.a.expected;
+				return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
+					A2(
+						$author$project$Main$logMessage,
+						'Closed, ' + A3($author$project$Main$closedString, code, wasClean, expected),
+						_Utils_update(
+							model,
+							{frameCount: $elm$core$Maybe$Nothing})));
+			case 'ErrorResponse':
+				var error = response.a;
+				return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
+					A2(
+						$author$project$Main$logMessage,
+						$billstclair$elm_websocket_client$PortFunnel$WebSocket$errorToString(error),
+						_Utils_update(
+							model,
+							{frameCount: $elm$core$Maybe$Nothing})));
+			default:
+				return _Utils_Tuple2(
+					function () {
+						var _v6 = $billstclair$elm_websocket_client$PortFunnel$WebSocket$reconnectedResponses(response);
+						if (!_v6.b) {
+							return model;
+						} else {
+							if ((_v6.a.$ === 'ReconnectedResponse') && (!_v6.b.b)) {
+								var r = _v6.a.a;
+								return A2($author$project$Main$logMessage, 'Reconnected: ' + r.description, model);
+							} else {
+								var list = _v6;
+								return A2(
+									$author$project$Main$logMessage,
+									$elm$core$Debug$toString(list),
+									model);
+							}
+						}
+					}(),
+					$elm$core$Platform$Cmd$none);
+		}
+	});
+var $author$project$Main$handlers = _List_fromArray(
+	[
+		$author$project$PortFunnels$WebSocketHandler($author$project$Main$socketHandler)
+	]);
 var $elm$core$Dict$fromList = function (assocs) {
 	return A3(
 		$elm$core$List$foldl,
@@ -5418,509 +5780,22 @@ var $elm$core$Dict$fromList = function (assocs) {
 		$elm$core$Dict$empty,
 		assocs);
 };
-var $elm$json$Json$Decode$decodeValue = _Json_run;
-var $billstclair$elm_port_funnel$PortFunnel$decodeValue = F2(
-	function (decoder, value) {
-		var _v0 = A2($elm$json$Json$Decode$decodeValue, decoder, value);
-		if (_v0.$ === 'Ok') {
-			var res = _v0.a;
-			return $elm$core$Result$Ok(res);
-		} else {
-			var err = _v0.a;
-			return $elm$core$Result$Err(
-				$elm$json$Json$Decode$errorToString(err));
-		}
+var $billstclair$elm_port_funnel$PortFunnel$FunnelSpec = F4(
+	function (accessors, moduleDesc, commander, handler) {
+		return {accessors: accessors, commander: commander, handler: handler, moduleDesc: moduleDesc};
+	});
+var $author$project$PortFunnels$WebSocketFunnel = function (a) {
+	return {$: 'WebSocketFunnel', a: a};
+};
+var $elm$core$Basics$composeR = F3(
+	function (f, g, x) {
+		return g(
+			f(x));
 	});
 var $billstclair$elm_port_funnel$PortFunnel$GenericMessage = F3(
 	function (moduleName, tag, args) {
 		return {args: args, moduleName: moduleName, tag: tag};
 	});
-var $elm$json$Json$Decode$field = _Json_decodeField;
-var $elm$json$Json$Decode$map3 = _Json_map3;
-var $elm$json$Json$Decode$string = _Json_decodeString;
-var $billstclair$elm_port_funnel$PortFunnel$genericMessageDecoder = A4(
-	$elm$json$Json$Decode$map3,
-	$billstclair$elm_port_funnel$PortFunnel$GenericMessage,
-	A2($elm$json$Json$Decode$field, 'module', $elm$json$Json$Decode$string),
-	A2($elm$json$Json$Decode$field, 'tag', $elm$json$Json$Decode$string),
-	A2($elm$json$Json$Decode$field, 'args', $elm$json$Json$Decode$value));
-var $billstclair$elm_port_funnel$PortFunnel$decodeGenericMessage = function (value) {
-	return A2($billstclair$elm_port_funnel$PortFunnel$decodeValue, $billstclair$elm_port_funnel$PortFunnel$genericMessageDecoder, value);
-};
-var $elm$json$Json$Encode$object = function (pairs) {
-	return _Json_wrap(
-		A3(
-			$elm$core$List$foldl,
-			F2(
-				function (_v0, obj) {
-					var k = _v0.a;
-					var v = _v0.b;
-					return A3(_Json_addField, k, v, obj);
-				}),
-			_Json_emptyObject(_Utils_Tuple0),
-			pairs));
-};
-var $elm$json$Json$Encode$string = _Json_wrap;
-var $billstclair$elm_port_funnel$PortFunnel$encodeGenericMessage = function (message) {
-	return $elm$json$Json$Encode$object(
-		_List_fromArray(
-			[
-				_Utils_Tuple2(
-				'module',
-				$elm$json$Json$Encode$string(message.moduleName)),
-				_Utils_Tuple2(
-				'tag',
-				$elm$json$Json$Encode$string(message.tag)),
-				_Utils_Tuple2('args', message.args)
-			]));
-};
-var $billstclair$elm_port_funnel$PortFunnel$makeSimulatedFunnelCmdPort = F4(
-	function (_v0, simulator, tagger, value) {
-		var moduleDesc = _v0.a;
-		var _v1 = $billstclair$elm_port_funnel$PortFunnel$decodeGenericMessage(value);
-		if (_v1.$ === 'Err') {
-			return $elm$core$Platform$Cmd$none;
-		} else {
-			var genericMessage = _v1.a;
-			var _v2 = moduleDesc.decoder(genericMessage);
-			if (_v2.$ === 'Err') {
-				return $elm$core$Platform$Cmd$none;
-			} else {
-				var message = _v2.a;
-				var _v3 = simulator(message);
-				if (_v3.$ === 'Nothing') {
-					return $elm$core$Platform$Cmd$none;
-				} else {
-					var receivedMessage = _v3.a;
-					return A2(
-						$elm$core$Task$perform,
-						tagger,
-						$elm$core$Task$succeed(
-							$billstclair$elm_port_funnel$PortFunnel$encodeGenericMessage(
-								moduleDesc.encoder(receivedMessage))));
-				}
-			}
-		}
-	});
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyBufferedAmount = F2(
-	function (key, bufferedAmount) {
-		return {bufferedAmount: bufferedAmount, key: key};
-	});
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyDescription = F2(
-	function (key, description) {
-		return {description: description, key: key};
-	});
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyMessage = F2(
-	function (key, message) {
-		return {key: key, message: message};
-	});
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyReason = F2(
-	function (key, reason) {
-		return {key: key, reason: reason};
-	});
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyUrl = F2(
-	function (key, url) {
-		return {key: key, url: url};
-	});
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyUrlKeepAlive = F3(
-	function (key, url, keepAlive) {
-		return {keepAlive: keepAlive, key: key, url: url};
-	});
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$MillisId = F2(
-	function (millis, id) {
-		return {id: id, millis: millis};
-	});
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIBytesQueued = function (a) {
-	return {$: 'PIBytesQueued', a: a};
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIClosed = function (a) {
-	return {$: 'PIClosed', a: a};
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIClosedRecord = F5(
-	function (key, bytesQueued, code, reason, wasClean) {
-		return {bytesQueued: bytesQueued, code: code, key: key, reason: reason, wasClean: wasClean};
-	});
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIConnected = function (a) {
-	return {$: 'PIConnected', a: a};
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIDelayed = function (a) {
-	return {$: 'PIDelayed', a: a};
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIError = function (a) {
-	return {$: 'PIError', a: a};
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIErrorRecord = F5(
-	function (key, code, description, name, message) {
-		return {code: code, description: description, key: key, message: message, name: name};
-	});
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIMessageReceived = function (a) {
-	return {$: 'PIMessageReceived', a: a};
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$POBytesQueued = function (a) {
-	return {$: 'POBytesQueued', a: a};
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$POClose = function (a) {
-	return {$: 'POClose', a: a};
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PODelay = function (a) {
-	return {$: 'PODelay', a: a};
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$POOpen = function (a) {
-	return {$: 'POOpen', a: a};
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$POSend = function (a) {
-	return {$: 'POSend', a: a};
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillClose = function (a) {
-	return {$: 'PWillClose', a: a};
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillOpen = function (a) {
-	return {$: 'PWillOpen', a: a};
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillSend = function (a) {
-	return {$: 'PWillSend', a: a};
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$Startup = {$: 'Startup'};
-var $elm$json$Json$Decode$bool = _Json_decodeBool;
-var $elm$json$Json$Decode$int = _Json_decodeInt;
-var $elm$json$Json$Decode$null = _Json_decodeNull;
-var $elm$json$Json$Decode$oneOf = _Json_oneOf;
-var $elm$json$Json$Decode$nullable = function (decoder) {
-	return $elm$json$Json$Decode$oneOf(
-		_List_fromArray(
-			[
-				$elm$json$Json$Decode$null($elm$core$Maybe$Nothing),
-				A2($elm$json$Json$Decode$map, $elm$core$Maybe$Just, decoder)
-			]));
-};
-var $NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$custom = $elm$json$Json$Decode$map2($elm$core$Basics$apR);
-var $elm$json$Json$Decode$andThen = _Json_andThen;
-var $elm$json$Json$Decode$fail = _Json_fail;
-var $NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$optionalDecoder = F3(
-	function (pathDecoder, valDecoder, fallback) {
-		var nullOr = function (decoder) {
-			return $elm$json$Json$Decode$oneOf(
-				_List_fromArray(
-					[
-						decoder,
-						$elm$json$Json$Decode$null(fallback)
-					]));
-		};
-		var handleResult = function (input) {
-			var _v0 = A2($elm$json$Json$Decode$decodeValue, pathDecoder, input);
-			if (_v0.$ === 'Ok') {
-				var rawValue = _v0.a;
-				var _v1 = A2(
-					$elm$json$Json$Decode$decodeValue,
-					nullOr(valDecoder),
-					rawValue);
-				if (_v1.$ === 'Ok') {
-					var finalResult = _v1.a;
-					return $elm$json$Json$Decode$succeed(finalResult);
-				} else {
-					var finalErr = _v1.a;
-					return $elm$json$Json$Decode$fail(
-						$elm$json$Json$Decode$errorToString(finalErr));
-				}
-			} else {
-				return $elm$json$Json$Decode$succeed(fallback);
-			}
-		};
-		return A2($elm$json$Json$Decode$andThen, handleResult, $elm$json$Json$Decode$value);
-	});
-var $NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$optional = F4(
-	function (key, valDecoder, fallback, decoder) {
-		return A2(
-			$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$custom,
-			A3(
-				$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$optionalDecoder,
-				A2($elm$json$Json$Decode$field, key, $elm$json$Json$Decode$value),
-				valDecoder,
-				fallback),
-			decoder);
-	});
-var $NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required = F3(
-	function (key, valDecoder, decoder) {
-		return A2(
-			$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$custom,
-			A2($elm$json$Json$Decode$field, key, valDecoder),
-			decoder);
-	});
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode = F2(
-	function (value, decoder) {
-		var _v0 = A2($elm$json$Json$Decode$decodeValue, decoder, value);
-		if (_v0.$ === 'Ok') {
-			var a = _v0.a;
-			return $elm$core$Result$Ok(a);
-		} else {
-			var err = _v0.a;
-			return $elm$core$Result$Err(
-				$elm$json$Json$Decode$errorToString(err));
-		}
-	});
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$decode = function (_v0) {
-	var tag = _v0.tag;
-	var args = _v0.args;
-	switch (tag) {
-		case 'startup':
-			return $elm$core$Result$Ok($billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$Startup);
-		case 'open':
-			return A2(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
-				args,
-				A2(
-					$elm$json$Json$Decode$map,
-					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$POOpen,
-					A3(
-						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-						'url',
-						$elm$json$Json$Decode$string,
-						A3(
-							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-							'key',
-							$elm$json$Json$Decode$string,
-							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyUrl)))));
-		case 'send':
-			return A2(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
-				args,
-				A2(
-					$elm$json$Json$Decode$map,
-					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$POSend,
-					A3(
-						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-						'message',
-						$elm$json$Json$Decode$string,
-						A3(
-							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-							'key',
-							$elm$json$Json$Decode$string,
-							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyMessage)))));
-		case 'close':
-			return A2(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
-				args,
-				A2(
-					$elm$json$Json$Decode$map,
-					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$POClose,
-					A3(
-						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-						'reason',
-						$elm$json$Json$Decode$string,
-						A3(
-							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-							'key',
-							$elm$json$Json$Decode$string,
-							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyReason)))));
-		case 'getBytesQueued':
-			return A2(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
-				args,
-				A2(
-					$elm$json$Json$Decode$map,
-					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$POBytesQueued,
-					A3(
-						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-						'key',
-						$elm$json$Json$Decode$string,
-						$elm$json$Json$Decode$succeed(
-							function (key) {
-								return {key: key};
-							}))));
-		case 'delay':
-			return A2(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
-				args,
-				A2(
-					$elm$json$Json$Decode$map,
-					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PODelay,
-					A3(
-						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-						'id',
-						$elm$json$Json$Decode$string,
-						A3(
-							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-							'millis',
-							$elm$json$Json$Decode$int,
-							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$MillisId)))));
-		case 'willopen':
-			return A2(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
-				args,
-				A2(
-					$elm$json$Json$Decode$map,
-					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillOpen,
-					A3(
-						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-						'keepAlive',
-						$elm$json$Json$Decode$bool,
-						A3(
-							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-							'url',
-							$elm$json$Json$Decode$string,
-							A3(
-								$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-								'key',
-								$elm$json$Json$Decode$string,
-								$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyUrlKeepAlive))))));
-		case 'willsend':
-			return A2(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
-				args,
-				A2(
-					$elm$json$Json$Decode$map,
-					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillSend,
-					A3(
-						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-						'message',
-						$elm$json$Json$Decode$string,
-						A3(
-							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-							'key',
-							$elm$json$Json$Decode$string,
-							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyMessage)))));
-		case 'willclose':
-			return A2(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
-				args,
-				A2(
-					$elm$json$Json$Decode$map,
-					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillClose,
-					A3(
-						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-						'reason',
-						$elm$json$Json$Decode$string,
-						A3(
-							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-							'key',
-							$elm$json$Json$Decode$string,
-							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyReason)))));
-		case 'connected':
-			return A2(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
-				args,
-				A2(
-					$elm$json$Json$Decode$map,
-					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIConnected,
-					A3(
-						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-						'description',
-						$elm$json$Json$Decode$string,
-						A3(
-							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-							'key',
-							$elm$json$Json$Decode$string,
-							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyDescription)))));
-		case 'messageReceived':
-			return A2(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
-				args,
-				A2(
-					$elm$json$Json$Decode$map,
-					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIMessageReceived,
-					A3(
-						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-						'message',
-						$elm$json$Json$Decode$string,
-						A3(
-							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-							'key',
-							$elm$json$Json$Decode$string,
-							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyMessage)))));
-		case 'closed':
-			return A2(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
-				args,
-				A2(
-					$elm$json$Json$Decode$map,
-					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIClosed,
-					A3(
-						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-						'wasClean',
-						$elm$json$Json$Decode$bool,
-						A3(
-							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-							'reason',
-							$elm$json$Json$Decode$string,
-							A3(
-								$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-								'code',
-								$elm$json$Json$Decode$int,
-								A3(
-									$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-									'bytesQueued',
-									$elm$json$Json$Decode$int,
-									A3(
-										$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-										'key',
-										$elm$json$Json$Decode$string,
-										$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIClosedRecord))))))));
-		case 'bytesQueued':
-			return A2(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
-				args,
-				A2(
-					$elm$json$Json$Decode$map,
-					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIBytesQueued,
-					A3(
-						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-						'bufferedAmount',
-						$elm$json$Json$Decode$int,
-						A3(
-							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-							'key',
-							$elm$json$Json$Decode$string,
-							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyBufferedAmount)))));
-		case 'delayed':
-			return A2(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
-				args,
-				A2(
-					$elm$json$Json$Decode$map,
-					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIDelayed,
-					A3(
-						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-						'id',
-						$elm$json$Json$Decode$string,
-						$elm$json$Json$Decode$succeed(
-							function (id) {
-								return {id: id};
-							}))));
-		case 'error':
-			return A2(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
-				args,
-				A2(
-					$elm$json$Json$Decode$map,
-					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIError,
-					A4(
-						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$optional,
-						'message',
-						$elm$json$Json$Decode$nullable($elm$json$Json$Decode$string),
-						$elm$core$Maybe$Nothing,
-						A4(
-							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$optional,
-							'name',
-							$elm$json$Json$Decode$nullable($elm$json$Json$Decode$string),
-							$elm$core$Maybe$Nothing,
-							A3(
-								$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-								'description',
-								$elm$json$Json$Decode$string,
-								A3(
-									$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
-									'code',
-									$elm$json$Json$Decode$string,
-									A4(
-										$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$optional,
-										'key',
-										$elm$json$Json$Decode$nullable($elm$json$Json$Decode$string),
-										$elm$core$Maybe$Nothing,
-										$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIErrorRecord))))))));
-		default:
-			return $elm$core$Result$Err('Unknown tag: ' + tag);
-	}
-};
 var $elm$json$Json$Encode$bool = _Json_wrap;
 var $elm$core$List$append = F2(
 	function (xs, ys) {
@@ -5936,6 +5811,20 @@ var $elm$core$List$concat = function (lists) {
 var $elm$json$Json$Encode$int = _Json_wrap;
 var $billstclair$elm_websocket_client$PortFunnel$WebSocket$moduleName = 'WebSocket';
 var $elm$json$Json$Encode$null = _Json_encodeNull;
+var $elm$json$Json$Encode$object = function (pairs) {
+	return _Json_wrap(
+		A3(
+			$elm$core$List$foldl,
+			F2(
+				function (_v0, obj) {
+					var k = _v0.a;
+					var v = _v0.b;
+					return A3(_Json_addField, k, v, obj);
+				}),
+			_Json_emptyObject(_Utils_Tuple0),
+			pairs));
+};
+var $elm$json$Json$Encode$string = _Json_wrap;
 var $billstclair$elm_websocket_client$PortFunnel$WebSocket$encode = function (mess) {
 	var gm = F2(
 		function (tag, args) {
@@ -6224,6 +6113,458 @@ var $billstclair$elm_websocket_client$PortFunnel$WebSocket$encode = function (me
 							]))));
 	}
 };
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$commander = F2(
+	function (gfPort, response) {
+		switch (response.$) {
+			case 'CmdResponse':
+				var message = response.a;
+				return gfPort(
+					$billstclair$elm_websocket_client$PortFunnel$WebSocket$encode(message));
+			case 'ListResponse':
+				var responses = response.a;
+				return $elm$core$Platform$Cmd$batch(
+					A2(
+						$elm$core$List$map,
+						A2($elm$core$Basics$composeR, $billstclair$elm_websocket_client$PortFunnel$WebSocket$encode, gfPort),
+						A3(
+							$elm$core$List$foldl,
+							F2(
+								function (rsp, res) {
+									if (rsp.$ === 'CmdResponse') {
+										var message = rsp.a;
+										return A2($elm$core$List$cons, message, res);
+									} else {
+										return res;
+									}
+								}),
+							_List_Nil,
+							responses)));
+			default:
+				return $elm$core$Platform$Cmd$none;
+		}
+	});
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyBufferedAmount = F2(
+	function (key, bufferedAmount) {
+		return {bufferedAmount: bufferedAmount, key: key};
+	});
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyDescription = F2(
+	function (key, description) {
+		return {description: description, key: key};
+	});
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyMessage = F2(
+	function (key, message) {
+		return {key: key, message: message};
+	});
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyReason = F2(
+	function (key, reason) {
+		return {key: key, reason: reason};
+	});
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyUrl = F2(
+	function (key, url) {
+		return {key: key, url: url};
+	});
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyUrlKeepAlive = F3(
+	function (key, url, keepAlive) {
+		return {keepAlive: keepAlive, key: key, url: url};
+	});
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$MillisId = F2(
+	function (millis, id) {
+		return {id: id, millis: millis};
+	});
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIBytesQueued = function (a) {
+	return {$: 'PIBytesQueued', a: a};
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIClosed = function (a) {
+	return {$: 'PIClosed', a: a};
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIClosedRecord = F5(
+	function (key, bytesQueued, code, reason, wasClean) {
+		return {bytesQueued: bytesQueued, code: code, key: key, reason: reason, wasClean: wasClean};
+	});
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIConnected = function (a) {
+	return {$: 'PIConnected', a: a};
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIDelayed = function (a) {
+	return {$: 'PIDelayed', a: a};
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIError = function (a) {
+	return {$: 'PIError', a: a};
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIErrorRecord = F5(
+	function (key, code, description, name, message) {
+		return {code: code, description: description, key: key, message: message, name: name};
+	});
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIMessageReceived = function (a) {
+	return {$: 'PIMessageReceived', a: a};
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$POBytesQueued = function (a) {
+	return {$: 'POBytesQueued', a: a};
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$POClose = function (a) {
+	return {$: 'POClose', a: a};
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PODelay = function (a) {
+	return {$: 'PODelay', a: a};
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$POOpen = function (a) {
+	return {$: 'POOpen', a: a};
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$POSend = function (a) {
+	return {$: 'POSend', a: a};
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillClose = function (a) {
+	return {$: 'PWillClose', a: a};
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillOpen = function (a) {
+	return {$: 'PWillOpen', a: a};
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillSend = function (a) {
+	return {$: 'PWillSend', a: a};
+};
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$Startup = {$: 'Startup'};
+var $elm$json$Json$Decode$bool = _Json_decodeBool;
+var $elm$json$Json$Decode$int = _Json_decodeInt;
+var $elm$json$Json$Decode$null = _Json_decodeNull;
+var $elm$json$Json$Decode$oneOf = _Json_oneOf;
+var $elm$json$Json$Decode$nullable = function (decoder) {
+	return $elm$json$Json$Decode$oneOf(
+		_List_fromArray(
+			[
+				$elm$json$Json$Decode$null($elm$core$Maybe$Nothing),
+				A2($elm$json$Json$Decode$map, $elm$core$Maybe$Just, decoder)
+			]));
+};
+var $NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$custom = $elm$json$Json$Decode$map2($elm$core$Basics$apR);
+var $elm$json$Json$Decode$field = _Json_decodeField;
+var $elm$json$Json$Decode$andThen = _Json_andThen;
+var $elm$json$Json$Decode$decodeValue = _Json_run;
+var $elm$json$Json$Decode$fail = _Json_fail;
+var $NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$optionalDecoder = F3(
+	function (pathDecoder, valDecoder, fallback) {
+		var nullOr = function (decoder) {
+			return $elm$json$Json$Decode$oneOf(
+				_List_fromArray(
+					[
+						decoder,
+						$elm$json$Json$Decode$null(fallback)
+					]));
+		};
+		var handleResult = function (input) {
+			var _v0 = A2($elm$json$Json$Decode$decodeValue, pathDecoder, input);
+			if (_v0.$ === 'Ok') {
+				var rawValue = _v0.a;
+				var _v1 = A2(
+					$elm$json$Json$Decode$decodeValue,
+					nullOr(valDecoder),
+					rawValue);
+				if (_v1.$ === 'Ok') {
+					var finalResult = _v1.a;
+					return $elm$json$Json$Decode$succeed(finalResult);
+				} else {
+					var finalErr = _v1.a;
+					return $elm$json$Json$Decode$fail(
+						$elm$json$Json$Decode$errorToString(finalErr));
+				}
+			} else {
+				return $elm$json$Json$Decode$succeed(fallback);
+			}
+		};
+		return A2($elm$json$Json$Decode$andThen, handleResult, $elm$json$Json$Decode$value);
+	});
+var $NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$optional = F4(
+	function (key, valDecoder, fallback, decoder) {
+		return A2(
+			$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$custom,
+			A3(
+				$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$optionalDecoder,
+				A2($elm$json$Json$Decode$field, key, $elm$json$Json$Decode$value),
+				valDecoder,
+				fallback),
+			decoder);
+	});
+var $NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required = F3(
+	function (key, valDecoder, decoder) {
+		return A2(
+			$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$custom,
+			A2($elm$json$Json$Decode$field, key, valDecoder),
+			decoder);
+	});
+var $elm$json$Json$Decode$string = _Json_decodeString;
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode = F2(
+	function (value, decoder) {
+		var _v0 = A2($elm$json$Json$Decode$decodeValue, decoder, value);
+		if (_v0.$ === 'Ok') {
+			var a = _v0.a;
+			return $elm$core$Result$Ok(a);
+		} else {
+			var err = _v0.a;
+			return $elm$core$Result$Err(
+				$elm$json$Json$Decode$errorToString(err));
+		}
+	});
+var $billstclair$elm_websocket_client$PortFunnel$WebSocket$decode = function (_v0) {
+	var tag = _v0.tag;
+	var args = _v0.args;
+	switch (tag) {
+		case 'startup':
+			return $elm$core$Result$Ok($billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$Startup);
+		case 'open':
+			return A2(
+				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
+				args,
+				A2(
+					$elm$json$Json$Decode$map,
+					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$POOpen,
+					A3(
+						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+						'url',
+						$elm$json$Json$Decode$string,
+						A3(
+							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+							'key',
+							$elm$json$Json$Decode$string,
+							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyUrl)))));
+		case 'send':
+			return A2(
+				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
+				args,
+				A2(
+					$elm$json$Json$Decode$map,
+					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$POSend,
+					A3(
+						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+						'message',
+						$elm$json$Json$Decode$string,
+						A3(
+							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+							'key',
+							$elm$json$Json$Decode$string,
+							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyMessage)))));
+		case 'close':
+			return A2(
+				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
+				args,
+				A2(
+					$elm$json$Json$Decode$map,
+					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$POClose,
+					A3(
+						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+						'reason',
+						$elm$json$Json$Decode$string,
+						A3(
+							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+							'key',
+							$elm$json$Json$Decode$string,
+							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyReason)))));
+		case 'getBytesQueued':
+			return A2(
+				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
+				args,
+				A2(
+					$elm$json$Json$Decode$map,
+					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$POBytesQueued,
+					A3(
+						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+						'key',
+						$elm$json$Json$Decode$string,
+						$elm$json$Json$Decode$succeed(
+							function (key) {
+								return {key: key};
+							}))));
+		case 'delay':
+			return A2(
+				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
+				args,
+				A2(
+					$elm$json$Json$Decode$map,
+					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PODelay,
+					A3(
+						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+						'id',
+						$elm$json$Json$Decode$string,
+						A3(
+							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+							'millis',
+							$elm$json$Json$Decode$int,
+							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$MillisId)))));
+		case 'willopen':
+			return A2(
+				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
+				args,
+				A2(
+					$elm$json$Json$Decode$map,
+					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillOpen,
+					A3(
+						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+						'keepAlive',
+						$elm$json$Json$Decode$bool,
+						A3(
+							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+							'url',
+							$elm$json$Json$Decode$string,
+							A3(
+								$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+								'key',
+								$elm$json$Json$Decode$string,
+								$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyUrlKeepAlive))))));
+		case 'willsend':
+			return A2(
+				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
+				args,
+				A2(
+					$elm$json$Json$Decode$map,
+					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillSend,
+					A3(
+						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+						'message',
+						$elm$json$Json$Decode$string,
+						A3(
+							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+							'key',
+							$elm$json$Json$Decode$string,
+							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyMessage)))));
+		case 'willclose':
+			return A2(
+				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
+				args,
+				A2(
+					$elm$json$Json$Decode$map,
+					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillClose,
+					A3(
+						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+						'reason',
+						$elm$json$Json$Decode$string,
+						A3(
+							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+							'key',
+							$elm$json$Json$Decode$string,
+							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyReason)))));
+		case 'connected':
+			return A2(
+				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
+				args,
+				A2(
+					$elm$json$Json$Decode$map,
+					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIConnected,
+					A3(
+						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+						'description',
+						$elm$json$Json$Decode$string,
+						A3(
+							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+							'key',
+							$elm$json$Json$Decode$string,
+							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyDescription)))));
+		case 'messageReceived':
+			return A2(
+				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
+				args,
+				A2(
+					$elm$json$Json$Decode$map,
+					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIMessageReceived,
+					A3(
+						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+						'message',
+						$elm$json$Json$Decode$string,
+						A3(
+							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+							'key',
+							$elm$json$Json$Decode$string,
+							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyMessage)))));
+		case 'closed':
+			return A2(
+				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
+				args,
+				A2(
+					$elm$json$Json$Decode$map,
+					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIClosed,
+					A3(
+						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+						'wasClean',
+						$elm$json$Json$Decode$bool,
+						A3(
+							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+							'reason',
+							$elm$json$Json$Decode$string,
+							A3(
+								$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+								'code',
+								$elm$json$Json$Decode$int,
+								A3(
+									$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+									'bytesQueued',
+									$elm$json$Json$Decode$int,
+									A3(
+										$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+										'key',
+										$elm$json$Json$Decode$string,
+										$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIClosedRecord))))))));
+		case 'bytesQueued':
+			return A2(
+				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
+				args,
+				A2(
+					$elm$json$Json$Decode$map,
+					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIBytesQueued,
+					A3(
+						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+						'bufferedAmount',
+						$elm$json$Json$Decode$int,
+						A3(
+							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+							'key',
+							$elm$json$Json$Decode$string,
+							$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$KeyBufferedAmount)))));
+		case 'delayed':
+			return A2(
+				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
+				args,
+				A2(
+					$elm$json$Json$Decode$map,
+					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIDelayed,
+					A3(
+						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+						'id',
+						$elm$json$Json$Decode$string,
+						$elm$json$Json$Decode$succeed(
+							function (id) {
+								return {id: id};
+							}))));
+		case 'error':
+			return A2(
+				$billstclair$elm_websocket_client$PortFunnel$WebSocket$valueDecode,
+				args,
+				A2(
+					$elm$json$Json$Decode$map,
+					$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIError,
+					A4(
+						$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$optional,
+						'message',
+						$elm$json$Json$Decode$nullable($elm$json$Json$Decode$string),
+						$elm$core$Maybe$Nothing,
+						A4(
+							$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$optional,
+							'name',
+							$elm$json$Json$Decode$nullable($elm$json$Json$Decode$string),
+							$elm$core$Maybe$Nothing,
+							A3(
+								$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+								'description',
+								$elm$json$Json$Decode$string,
+								A3(
+									$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$required,
+									'code',
+									$elm$json$Json$Decode$string,
+									A4(
+										$NoRedInk$elm_json_decode_pipeline$Json$Decode$Pipeline$optional,
+										'key',
+										$elm$json$Json$Decode$nullable($elm$json$Json$Decode$string),
+										$elm$core$Maybe$Nothing,
+										$elm$json$Json$Decode$succeed($billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIErrorRecord))))))));
+		default:
+			return $elm$core$Result$Err('Unknown tag: ' + tag);
+	}
+};
 var $billstclair$elm_port_funnel$PortFunnel$ModuleDesc = function (a) {
 	return {$: 'ModuleDesc', a: a};
 };
@@ -6307,13 +6648,35 @@ var $billstclair$elm_websocket_client$PortFunnel$WebSocket$closurePairs = _List_
 		_Utils_Tuple2(4000, $billstclair$elm_websocket_client$PortFunnel$WebSocket$TimedOutOnReconnect)
 	]);
 var $billstclair$elm_websocket_client$PortFunnel$WebSocket$closureDict = $elm$core$Dict$fromList($billstclair$elm_websocket_client$PortFunnel$WebSocket$closurePairs);
-var $elm$core$Maybe$withDefault = F2(
-	function (_default, maybe) {
-		if (maybe.$ === 'Just') {
-			var value = maybe.a;
-			return value;
-		} else {
-			return _default;
+var $elm$core$Dict$get = F2(
+	function (targetKey, dict) {
+		get:
+		while (true) {
+			if (dict.$ === 'RBEmpty_elm_builtin') {
+				return $elm$core$Maybe$Nothing;
+			} else {
+				var key = dict.b;
+				var value = dict.c;
+				var left = dict.d;
+				var right = dict.e;
+				var _v1 = A2($elm$core$Basics$compare, targetKey, key);
+				switch (_v1.$) {
+					case 'LT':
+						var $temp$targetKey = targetKey,
+							$temp$dict = left;
+						targetKey = $temp$targetKey;
+						dict = $temp$dict;
+						continue get;
+					case 'EQ':
+						return $elm$core$Maybe$Just(value);
+					default:
+						var $temp$targetKey = targetKey,
+							$temp$dict = right;
+						targetKey = $temp$targetKey;
+						dict = $temp$dict;
+						continue get;
+				}
+			}
 		}
 	});
 var $billstclair$elm_websocket_client$PortFunnel$WebSocket$closedCode = function (code) {
@@ -7240,466 +7603,6 @@ var $billstclair$elm_websocket_client$PortFunnel$WebSocket$process = F2(
 		}
 	});
 var $billstclair$elm_websocket_client$PortFunnel$WebSocket$moduleDesc = A4($billstclair$elm_port_funnel$PortFunnel$makeModuleDesc, $billstclair$elm_websocket_client$PortFunnel$WebSocket$moduleName, $billstclair$elm_websocket_client$PortFunnel$WebSocket$encode, $billstclair$elm_websocket_client$PortFunnel$WebSocket$decode, $billstclair$elm_websocket_client$PortFunnel$WebSocket$process);
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$simulator = function (mess) {
-	switch (mess.$) {
-		case 'Startup':
-			return $elm$core$Maybe$Nothing;
-		case 'PWillOpen':
-			var record = mess.a;
-			return $elm$core$Maybe$Just(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillOpen(record));
-		case 'POOpen':
-			var key = mess.a.key;
-			return $elm$core$Maybe$Just(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIConnected(
-					{description: 'Simulated connection.', key: key}));
-		case 'PWillSend':
-			var record = mess.a;
-			return $elm$core$Maybe$Just(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillSend(record));
-		case 'POSend':
-			var key = mess.a.key;
-			var message = mess.a.message;
-			return $elm$core$Maybe$Just(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIMessageReceived(
-					{key: key, message: message}));
-		case 'PWillClose':
-			var record = mess.a;
-			return $elm$core$Maybe$Just(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillClose(record));
-		case 'POClose':
-			var key = mess.a.key;
-			var reason = mess.a.reason;
-			return $elm$core$Maybe$Just(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIClosed(
-					{
-						bytesQueued: 0,
-						code: $billstclair$elm_websocket_client$PortFunnel$WebSocket$closedCodeNumber($billstclair$elm_websocket_client$PortFunnel$WebSocket$NormalClosure),
-						key: key,
-						reason: 'You asked for it, you got it, Toyota!',
-						wasClean: true
-					}));
-		case 'POBytesQueued':
-			var key = mess.a.key;
-			return $elm$core$Maybe$Just(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIBytesQueued(
-					{bufferedAmount: 0, key: key}));
-		case 'PODelay':
-			var millis = mess.a.millis;
-			var id = mess.a.id;
-			return $elm$core$Maybe$Just(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIDelayed(
-					{id: id}));
-		default:
-			var name = $billstclair$elm_websocket_client$PortFunnel$WebSocket$encode(mess).tag;
-			return $elm$core$Maybe$Just(
-				$billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PIError(
-					{
-						code: 'Unknown message',
-						description: 'You asked me to simulate an incoming message.',
-						key: $elm$core$Maybe$Nothing,
-						message: $elm$core$Maybe$Nothing,
-						name: $elm$core$Maybe$Just(name)
-					}));
-	}
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$makeSimulatedCmdPort = A2($billstclair$elm_port_funnel$PortFunnel$makeSimulatedFunnelCmdPort, $billstclair$elm_websocket_client$PortFunnel$WebSocket$moduleDesc, $billstclair$elm_websocket_client$PortFunnel$WebSocket$simulator);
-var $author$project$PortFunnels$simulatedPortDict = $elm$core$Dict$fromList(
-	_List_fromArray(
-		[
-			_Utils_Tuple2($billstclair$elm_websocket_client$PortFunnel$WebSocket$moduleName, $billstclair$elm_websocket_client$PortFunnel$WebSocket$makeSimulatedCmdPort)
-		]));
-var $author$project$PortFunnels$getCmdPort = F3(
-	function (tagger, moduleName, useSimulator) {
-		if (!useSimulator) {
-			return $author$project$PortFunnels$cmdPort;
-		} else {
-			var _v0 = A2($elm$core$Dict$get, moduleName, $author$project$PortFunnels$simulatedPortDict);
-			if (_v0.$ === 'Just') {
-				var makeSimulatedCmdPort = _v0.a;
-				return makeSimulatedCmdPort(tagger);
-			} else {
-				return $author$project$PortFunnels$cmdPort;
-			}
-		}
-	});
-var $author$project$Main$getCmdPort = F2(
-	function (moduleName, model) {
-		return A3($author$project$PortFunnels$getCmdPort, $author$project$Main$Process, moduleName, model.useSimulator);
-	});
-var $author$project$PortFunnels$WebSocketHandler = function (a) {
-	return {$: 'WebSocketHandler', a: a};
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$closedCodeToString = function (code) {
-	switch (code.$) {
-		case 'NormalClosure':
-			return 'Normal';
-		case 'GoingAwayClosure':
-			return 'GoingAway';
-		case 'ProtocolErrorClosure':
-			return 'ProtocolError';
-		case 'UnsupportedDataClosure':
-			return 'UnsupportedData';
-		case 'NoStatusRecvdClosure':
-			return 'NoStatusRecvd';
-		case 'AbnormalClosure':
-			return 'Abnormal';
-		case 'InvalidFramePayloadDataClosure':
-			return 'InvalidFramePayloadData';
-		case 'PolicyViolationClosure':
-			return 'PolicyViolation';
-		case 'MessageTooBigClosure':
-			return 'MessageTooBig';
-		case 'MissingExtensionClosure':
-			return 'MissingExtension';
-		case 'InternalErrorClosure':
-			return 'InternalError';
-		case 'ServiceRestartClosure':
-			return 'ServiceRestart';
-		case 'TryAgainLaterClosure':
-			return 'TryAgainLater';
-		case 'BadGatewayClosure':
-			return 'BadGateway';
-		case 'TLSHandshakeClosure':
-			return 'TLSHandshake';
-		case 'TimedOutOnReconnect':
-			return 'TimedOutOnReconnect';
-		default:
-			return 'UnknownClosureCode';
-	}
-};
-var $author$project$Main$closedString = F3(
-	function (code, wasClean, expected) {
-		return 'code: ' + ($billstclair$elm_websocket_client$PortFunnel$WebSocket$closedCodeToString(code) + (', ' + ((wasClean ? 'clean' : 'not clean') + (', ' + (expected ? 'expected' : 'NOT expected')))));
-	});
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$isLoaded = function (_v0) {
-	var state = _v0.a;
-	return state.isLoaded;
-};
-var $author$project$Main$doIsLoaded = function (model) {
-	return ((!model.wasLoaded) && $billstclair$elm_websocket_client$PortFunnel$WebSocket$isLoaded(model.state.websocket)) ? _Utils_update(
-		model,
-		{useSimulator: false, wasLoaded: true}) : model;
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$maybeStringToString = function (string) {
-	if (string.$ === 'Nothing') {
-		return 'Nothing';
-	} else {
-		var s = string.a;
-		return 'Just \"' + (s + '\"');
-	}
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$maybeString = function (s) {
-	if (s.$ === 'Nothing') {
-		return 'Nothing';
-	} else {
-		var string = s.a;
-		return 'Just ' + string;
-	}
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$toString = function (mess) {
-	switch (mess.$) {
-		case 'Startup':
-			return '<Startup>';
-		case 'PWillOpen':
-			var key = mess.a.key;
-			var url = mess.a.url;
-			var keepAlive = mess.a.keepAlive;
-			return 'PWillOpen { key = \"' + (key + ('\", url = \"' + (url + ('\", keepAlive = ' + (keepAlive ? 'True' : ('False' + '}'))))));
-		case 'POOpen':
-			var key = mess.a.key;
-			var url = mess.a.url;
-			return 'POOpen { key = \"' + (key + ('\", url = \"' + (url + '\"}')));
-		case 'PIConnected':
-			var key = mess.a.key;
-			var description = mess.a.description;
-			return 'PIConnected { key = \"' + (key + ('\", description = \"' + (description + '\"}')));
-		case 'PWillSend':
-			var key = mess.a.key;
-			var message = mess.a.message;
-			return 'PWillSend { key = \"' + (key + ('\", message = \"' + (message + '\"}')));
-		case 'POSend':
-			var key = mess.a.key;
-			var message = mess.a.message;
-			return 'POSend { key = \"' + (key + ('\", message = \"' + (message + '\"}')));
-		case 'PIMessageReceived':
-			var key = mess.a.key;
-			var message = mess.a.message;
-			return 'PIMessageReceived { key = \"' + (key + ('\", message = \"' + (message + '\"}')));
-		case 'PWillClose':
-			var key = mess.a.key;
-			var reason = mess.a.reason;
-			return 'PWillClose { key = \"' + (key + ('\", reason = \"' + (reason + '\"}')));
-		case 'POClose':
-			var key = mess.a.key;
-			var reason = mess.a.reason;
-			return 'POClose { key = \"' + (key + ('\", reason = \"' + (reason + '\"}')));
-		case 'PIClosed':
-			var key = mess.a.key;
-			var bytesQueued = mess.a.bytesQueued;
-			var code = mess.a.code;
-			var reason = mess.a.reason;
-			var wasClean = mess.a.wasClean;
-			return 'PIClosed { key = \"' + (key + ('\", bytesQueued = \"' + ($elm$core$String$fromInt(bytesQueued) + ('\", code = \"' + ($elm$core$String$fromInt(code) + ('\", reason = \"' + (reason + ('\", wasClean = \"' + (wasClean ? 'True' : ('False' + '\"}'))))))))));
-		case 'POBytesQueued':
-			var key = mess.a.key;
-			return 'POBytesQueued { key = \"' + (key + '\"}');
-		case 'PIBytesQueued':
-			var key = mess.a.key;
-			var bufferedAmount = mess.a.bufferedAmount;
-			return 'PIBytesQueued { key = \"' + (key + ('\", bufferedAmount = \"' + ($elm$core$String$fromInt(bufferedAmount) + '\"}')));
-		case 'PODelay':
-			var millis = mess.a.millis;
-			var id = mess.a.id;
-			return 'PODelay { millis = \"' + ($elm$core$String$fromInt(millis) + ('\" id = \"' + (id + '\"}')));
-		case 'PIDelayed':
-			var id = mess.a.id;
-			return 'PIDelayed { id = \"' + (id + '\"}');
-		default:
-			var key = mess.a.key;
-			var code = mess.a.code;
-			var description = mess.a.description;
-			var name = mess.a.name;
-			return 'PIError { key = \"' + ($billstclair$elm_websocket_client$PortFunnel$WebSocket$maybeString(key) + ('\" code = \"' + (code + ('\" description = \"' + (description + ('\" name = \"' + ($billstclair$elm_websocket_client$PortFunnel$WebSocket$maybeString(name) + '\"}')))))));
-	}
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$errorToString = function (theError) {
-	switch (theError.$) {
-		case 'SocketAlreadyOpenError':
-			var key = theError.a;
-			return 'SocketAlreadyOpenError \"' + (key + '\"');
-		case 'SocketConnectingError':
-			var key = theError.a;
-			return 'SocketConnectingError \"' + (key + '\"');
-		case 'SocketClosingError':
-			var key = theError.a;
-			return 'SocketClosingError \"' + (key + '\"');
-		case 'SocketNotOpenError':
-			var key = theError.a;
-			return 'SocketNotOpenError \"' + (key + '\"');
-		case 'UnexpectedConnectedError':
-			var key = theError.a.key;
-			var description = theError.a.description;
-			return 'UnexpectedConnectedError\n { key = \"' + (key + ('\", description = \"' + (description + '\" }')));
-		case 'UnexpectedMessageError':
-			var key = theError.a.key;
-			var message = theError.a.message;
-			return 'UnexpectedMessageError { key = \"' + (key + ('\", message = \"' + (message + '\" }')));
-		case 'LowLevelError':
-			var key = theError.a.key;
-			var code = theError.a.code;
-			var description = theError.a.description;
-			var name = theError.a.name;
-			return 'LowLevelError { key = \"' + ($billstclair$elm_websocket_client$PortFunnel$WebSocket$maybeStringToString(key) + ('\", code = \"' + (code + ('\", description = \"' + (description + ('\", code = \"' + ($billstclair$elm_websocket_client$PortFunnel$WebSocket$maybeStringToString(name) + '\" }')))))));
-		default:
-			var message = theError.a.message;
-			return 'InvalidMessageError: ' + $billstclair$elm_websocket_client$PortFunnel$WebSocket$toString(message);
-	}
-};
-var $elm$core$String$lines = _String_lines;
-var $elm$core$List$filter = F2(
-	function (isGood, list) {
-		return A3(
-			$elm$core$List$foldr,
-			F2(
-				function (x, xs) {
-					return isGood(x) ? A2($elm$core$List$cons, x, xs) : xs;
-				}),
-			_List_Nil,
-			list);
-	});
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$isReconnectedResponse = function (response) {
-	if (response.$ === 'ReconnectedResponse') {
-		return true;
-	} else {
-		return false;
-	}
-};
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$reconnectedResponses = function (response) {
-	switch (response.$) {
-		case 'ReconnectedResponse':
-			return _List_fromArray(
-				[response]);
-		case 'ListResponse':
-			var list = response.a;
-			return A2($elm$core$List$filter, $billstclair$elm_websocket_client$PortFunnel$WebSocket$isReconnectedResponse, list);
-		default:
-			return _List_Nil;
-	}
-};
-var $elm$core$Debug$toString = _Debug_toString;
-var $author$project$Main$socketHandler = F3(
-	function (response, state, mdl) {
-		var model = $author$project$Main$doIsLoaded(
-			_Utils_update(
-				mdl,
-				{error: $elm$core$Maybe$Nothing, state: state}));
-		switch (response.$) {
-			case 'MessageReceivedResponse':
-				var message = response.a.message;
-				var _v1 = $elm$core$String$lines(message);
-				_v1$3:
-				while (true) {
-					if (_v1.b && _v1.b.b) {
-						if (!_v1.b.b.b) {
-							switch (_v1.a) {
-								case 'status':
-									var _v2 = _v1.b;
-									var status = _v2.a;
-									return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
-										_Utils_update(
-											model,
-											{status: status}));
-								case 'frame_count':
-									var _v3 = _v1.b;
-									var n = _v3.a;
-									return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
-										_Utils_update(
-											model,
-											{
-												frameCount: $elm$core$String$toInt(n)
-											}));
-								default:
-									break _v1$3;
-							}
-						} else {
-							if ((_v1.a === 'frame') && (!_v1.b.b.b.b)) {
-								var _v4 = _v1.b;
-								var n = _v4.a;
-								var _v5 = _v4.b;
-								var svg = _v5.a;
-								var nth = A2(
-									$elm$core$Maybe$withDefault,
-									0,
-									$elm$core$String$toInt(n));
-								return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
-									_Utils_update(
-										model,
-										{
-											frames: A3($elm$core$Dict$insert, nth, svg, model.frames)
-										}));
-							} else {
-								break _v1$3;
-							}
-						}
-					} else {
-						break _v1$3;
-					}
-				}
-				return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
-					_Utils_update(
-						model,
-						{
-							log: A2($elm$core$List$cons, 'Received \"' + (message + '\"'), model.log)
-						}));
-			case 'ConnectedResponse':
-				var r = response.a;
-				return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
-					_Utils_update(
-						model,
-						{
-							log: A2($elm$core$List$cons, 'Connected: ' + r.description, model.log)
-						}));
-			case 'ClosedResponse':
-				var code = response.a.code;
-				var wasClean = response.a.wasClean;
-				var expected = response.a.expected;
-				return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
-					_Utils_update(
-						model,
-						{
-							frameCount: $elm$core$Maybe$Nothing,
-							log: A2(
-								$elm$core$List$cons,
-								'Closed, ' + A3($author$project$Main$closedString, code, wasClean, expected),
-								model.log)
-						}));
-			case 'ErrorResponse':
-				var error = response.a;
-				return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
-					_Utils_update(
-						model,
-						{
-							frameCount: $elm$core$Maybe$Nothing,
-							log: A2(
-								$elm$core$List$cons,
-								$billstclair$elm_websocket_client$PortFunnel$WebSocket$errorToString(error),
-								model.log)
-						}));
-			default:
-				var _v6 = $billstclair$elm_websocket_client$PortFunnel$WebSocket$reconnectedResponses(response);
-				if (!_v6.b) {
-					return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(model);
-				} else {
-					if ((_v6.a.$ === 'ReconnectedResponse') && (!_v6.b.b)) {
-						var r = _v6.a.a;
-						return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
-							_Utils_update(
-								model,
-								{
-									log: A2($elm$core$List$cons, 'Reconnected: ' + r.description, model.log)
-								}));
-					} else {
-						var list = _v6;
-						return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
-							_Utils_update(
-								model,
-								{
-									log: A2(
-										$elm$core$List$cons,
-										$elm$core$Debug$toString(list),
-										model.log)
-								}));
-					}
-				}
-		}
-	});
-var $author$project$Main$handlers = _List_fromArray(
-	[
-		$author$project$PortFunnels$WebSocketHandler($author$project$Main$socketHandler)
-	]);
-var $billstclair$elm_port_funnel$PortFunnel$FunnelSpec = F4(
-	function (accessors, moduleDesc, commander, handler) {
-		return {accessors: accessors, commander: commander, handler: handler, moduleDesc: moduleDesc};
-	});
-var $author$project$PortFunnels$WebSocketFunnel = function (a) {
-	return {$: 'WebSocketFunnel', a: a};
-};
-var $elm$core$Basics$composeR = F3(
-	function (f, g, x) {
-		return g(
-			f(x));
-	});
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$commander = F2(
-	function (gfPort, response) {
-		switch (response.$) {
-			case 'CmdResponse':
-				var message = response.a;
-				return gfPort(
-					$billstclair$elm_websocket_client$PortFunnel$WebSocket$encode(message));
-			case 'ListResponse':
-				var responses = response.a;
-				return $elm$core$Platform$Cmd$batch(
-					A2(
-						$elm$core$List$map,
-						A2($elm$core$Basics$composeR, $billstclair$elm_websocket_client$PortFunnel$WebSocket$encode, gfPort),
-						A3(
-							$elm$core$List$foldl,
-							F2(
-								function (rsp, res) {
-									if (rsp.$ === 'CmdResponse') {
-										var message = rsp.a;
-										return A2($elm$core$List$cons, message, res);
-									} else {
-										return res;
-									}
-								}),
-							_List_Nil,
-							responses)));
-			default:
-				return $elm$core$Platform$Cmd$none;
-		}
-	});
 var $billstclair$elm_port_funnel$PortFunnel$StateAccessors = F2(
 	function (get, set) {
 		return {get: get, set: set};
@@ -7729,7 +7632,7 @@ var $author$project$PortFunnels$makeFunnelDict = F2(
 				A2($elm$core$List$map, $author$project$PortFunnels$handlerToFunnel, handlers)),
 			portGetter);
 	});
-var $author$project$Main$funnelDict = A2($author$project$PortFunnels$makeFunnelDict, $author$project$Main$handlers, $author$project$Main$getCmdPort);
+var $author$project$Main$funnelDict = A2($author$project$PortFunnels$makeFunnelDict, $author$project$Main$handlers, $author$project$PortFunnels$cmdPort);
 var $billstclair$elm_websocket_client$PortFunnel$WebSocket$makeClose = function (key) {
 	return $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillClose(
 		{key: key, reason: 'user request'});
@@ -7739,11 +7642,19 @@ var $billstclair$elm_websocket_client$PortFunnel$WebSocket$makeOpenWithKey = F2(
 		return $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillOpen(
 			{keepAlive: false, key: key, url: url});
 	});
-var $billstclair$elm_websocket_client$PortFunnel$WebSocket$makeSend = F2(
-	function (key, message) {
-		return $billstclair$elm_websocket_client$PortFunnel$WebSocket$InternalMessage$PWillSend(
-			{key: key, message: message});
-	});
+var $billstclair$elm_port_funnel$PortFunnel$encodeGenericMessage = function (message) {
+	return $elm$json$Json$Encode$object(
+		_List_fromArray(
+			[
+				_Utils_Tuple2(
+				'module',
+				$elm$json$Json$Encode$string(message.moduleName)),
+				_Utils_Tuple2(
+				'tag',
+				$elm$json$Json$Encode$string(message.tag)),
+				_Utils_Tuple2('args', message.args)
+			]));
+};
 var $billstclair$elm_port_funnel$PortFunnel$process = F4(
 	function (accessors, _v0, genericMessage, state) {
 		var moduleDesc = _v0.a;
@@ -7798,14 +7709,30 @@ var $billstclair$elm_port_funnel$PortFunnel$appProcess = F5(
 var $author$project$PortFunnels$appTrampoline = F5(
 	function (portGetter, genericMessage, funnel, state, model) {
 		var appFunnel = funnel.a;
-		return A5(
-			$billstclair$elm_port_funnel$PortFunnel$appProcess,
-			A2(portGetter, $billstclair$elm_websocket_client$PortFunnel$WebSocket$moduleName, model),
-			genericMessage,
-			appFunnel,
-			state,
-			model);
+		return A5($billstclair$elm_port_funnel$PortFunnel$appProcess, portGetter, genericMessage, appFunnel, state, model);
 	});
+var $billstclair$elm_port_funnel$PortFunnel$decodeValue = F2(
+	function (decoder, value) {
+		var _v0 = A2($elm$json$Json$Decode$decodeValue, decoder, value);
+		if (_v0.$ === 'Ok') {
+			var res = _v0.a;
+			return $elm$core$Result$Ok(res);
+		} else {
+			var err = _v0.a;
+			return $elm$core$Result$Err(
+				$elm$json$Json$Decode$errorToString(err));
+		}
+	});
+var $elm$json$Json$Decode$map3 = _Json_map3;
+var $billstclair$elm_port_funnel$PortFunnel$genericMessageDecoder = A4(
+	$elm$json$Json$Decode$map3,
+	$billstclair$elm_port_funnel$PortFunnel$GenericMessage,
+	A2($elm$json$Json$Decode$field, 'module', $elm$json$Json$Decode$string),
+	A2($elm$json$Json$Decode$field, 'tag', $elm$json$Json$Decode$string),
+	A2($elm$json$Json$Decode$field, 'args', $elm$json$Json$Decode$value));
+var $billstclair$elm_port_funnel$PortFunnel$decodeGenericMessage = function (value) {
+	return A2($billstclair$elm_port_funnel$PortFunnel$decodeValue, $billstclair$elm_port_funnel$PortFunnel$genericMessageDecoder, value);
+};
 var $billstclair$elm_port_funnel$PortFunnel$processValue = F5(
 	function (funnels, appTrampoline, value, state, model) {
 		var _v0 = $billstclair$elm_port_funnel$PortFunnel$decodeGenericMessage(value);
@@ -7858,13 +7785,9 @@ var $billstclair$elm_port_funnel$PortFunnel$sendMessage = F3(
 			A2($billstclair$elm_port_funnel$PortFunnel$messageToValue, moduleDesc, message));
 	});
 var $billstclair$elm_websocket_client$PortFunnel$WebSocket$send = $billstclair$elm_port_funnel$PortFunnel$sendMessage($billstclair$elm_websocket_client$PortFunnel$WebSocket$moduleDesc);
-var $author$project$Main$send = F2(
-	function (model, message) {
-		return A2(
-			$billstclair$elm_websocket_client$PortFunnel$WebSocket$send,
-			A2($author$project$Main$getCmdPort, $billstclair$elm_websocket_client$PortFunnel$WebSocket$moduleName, model),
-			message);
-	});
+var $author$project$Main$send = function (message) {
+	return A2($billstclair$elm_websocket_client$PortFunnel$WebSocket$send, $author$project$PortFunnels$cmdPort, message);
+};
 var $elm$core$Set$insert = F2(
 	function (key, _v0) {
 		var dict = _v0.a;
@@ -7898,23 +7821,12 @@ var $Janiczek$cmd_extra$Cmd$Extra$withCmd = F2(
 var $author$project$Main$update = F2(
 	function (msg, model) {
 		switch (msg.$) {
-			case 'UpdateSend':
-				var newsend = msg.a;
-				return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
-					_Utils_update(
-						model,
-						{send: newsend}));
 			case 'UpdateUrl':
 				var url = msg.a;
 				return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
 					_Utils_update(
 						model,
 						{url: url}));
-			case 'ToggleUseSimulator':
-				return $Janiczek$cmd_extra$Cmd$Extra$withNoCmd(
-					_Utils_update(
-						model,
-						{useSimulator: !model.useSimulator}));
 			case 'ToggleAutoReopen':
 				var state = model.state;
 				var socketState = state.websocket;
@@ -7932,36 +7844,13 @@ var $author$project$Main$update = F2(
 			case 'Connect':
 				return A2(
 					$Janiczek$cmd_extra$Cmd$Extra$withCmd,
-					A2(
-						$author$project$Main$send,
-						model,
+					$author$project$Main$send(
 						A2($billstclair$elm_websocket_client$PortFunnel$WebSocket$makeOpenWithKey, model.key, model.url)),
-					_Utils_update(
-						model,
-						{
-							log: A2(
-								$elm$core$List$cons,
-								model.useSimulator ? 'Connecting to simulator' : ('Connecting to ' + model.url),
-								model.log)
-						}));
-			case 'Send':
-				return A2(
-					$Janiczek$cmd_extra$Cmd$Extra$withCmd,
-					A2(
-						$author$project$Main$send,
-						model,
-						A2($billstclair$elm_websocket_client$PortFunnel$WebSocket$makeSend, model.key, model.send)),
-					_Utils_update(
-						model,
-						{
-							log: A2($elm$core$List$cons, 'Sending \"' + (model.send + '\"'), model.log)
-						}));
+					A2($author$project$Main$logMessage, 'Connecting to ' + model.url, model));
 			case 'Close':
 				return A2(
 					$Janiczek$cmd_extra$Cmd$Extra$withCmd,
-					A2(
-						$author$project$Main$send,
-						model,
+					$author$project$Main$send(
 						$billstclair$elm_websocket_client$PortFunnel$WebSocket$makeClose(model.key)),
 					_Utils_update(
 						model,

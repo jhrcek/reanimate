@@ -14,11 +14,11 @@ port module PortFunnels exposing
     ( FunnelDict
     , Handler(..)
     , State
-    , getCmdPort
+    , cmdPort
     , initialState
     , makeFunnelDict
     , processValue
-    , subscriptions
+    , subPort
     )
 
 {-| A copy of the PortFunnels.elm example module, modified for `PortFunnel.WebSocket`.
@@ -30,13 +30,11 @@ Note that this is a `port module`, and it defines the two ports that are used by
 -}
 
 import Dict exposing (Dict)
-import Html exposing (Html, a, button, div, h1, input, p, span, text)
-import Json.Encode as JE exposing (Value)
+import Json.Encode exposing (Value)
 import PortFunnel
     exposing
         ( FunnelSpec
         , GenericMessage
-        , ModuleDesc
         , StateAccessors
         )
 import PortFunnel.WebSocket as WebSocket
@@ -102,76 +100,28 @@ handlerToFunnel handler =
             )
 
 
-{-| Add a tuple to this list for each funnel module you use.
--}
-simulatedPortDict : Dict String ((Value -> msg) -> Value -> Cmd msg)
-simulatedPortDict =
-    Dict.fromList
-        [ ( WebSocket.moduleName, WebSocket.makeSimulatedCmdPort )
-        ]
-
-
 {-| This is called from `AppFunnel.processValue`.
 
 It unboxes the `Funnel` arg, and calls `PortFunnel.appProcess`.
 
 -}
-appTrampoline : (String -> model -> (Value -> Cmd msg)) -> GenericMessage -> Funnel model msg -> State -> model -> Result String ( model, Cmd msg )
+appTrampoline : (Value -> Cmd msg) -> GenericMessage -> Funnel model msg -> State -> model -> Result String ( model, Cmd msg )
 appTrampoline portGetter genericMessage funnel state model =
     -- Dispatch on the `Funnel` tag.
     -- This example has only one possibility.
     case funnel of
         WebSocketFunnel appFunnel ->
-            PortFunnel.appProcess (portGetter WebSocket.moduleName model)
+            PortFunnel.appProcess portGetter
                 genericMessage
                 appFunnel
                 state
                 model
 
 
-{-| Here are the two ports used to communicate with all the backend JavaScript.
-
-You can name them something besides `cmdPort` and `subPort`,
-but then you have to change the call to `PortFunnel.subscribe()`
-in `site/index.html`.
-
-If you run the application in `elm reactor`, these will go nowhere.
-
--}
 port cmdPort : Value -> Cmd msg
 
 
 port subPort : (Value -> msg) -> Sub msg
-
-
-{-| Create a subscription for the `subPort`, given a Msg wrapper.
--}
-subscriptions : (Value -> msg) -> model -> Sub msg
-subscriptions process model =
-    subPort process
-
-
-{-| Turn the `moduleName` inside a `GenericMessage` into the output port.
-
-    getCmdPort tagger moduleName useSimulator
-
-`tagger` is the same `Msg` that processes input from the subscription port.
-
-`moduleName` will be ignored if `useSimulator` is `False`.
-
--}
-getCmdPort : (Value -> msg) -> String -> Bool -> (Value -> Cmd msg)
-getCmdPort tagger moduleName useSimulator =
-    if not useSimulator then
-        cmdPort
-
-    else
-        case Dict.get moduleName simulatedPortDict of
-            Just makeSimulatedCmdPort ->
-                makeSimulatedCmdPort tagger
-
-            Nothing ->
-                cmdPort
 
 
 {-| A `Dict` that maps a module name to a concretized `FunnelSpec`.
@@ -180,12 +130,12 @@ Create one with `makeFunnelDict`. Pass it to `processValue`.
 
 -}
 type alias FunnelDict model msg =
-    ( Dict String (Funnel model msg), String -> model -> (Value -> Cmd msg) )
+    ( Dict String (Funnel model msg), Value -> Cmd msg )
 
 
 {-| Make a `Dict` mapping `moduleName` to tagged concrete `FunnelSpec`.
 -}
-makeFunnelDict : List (Handler model msg) -> (String -> model -> (Value -> Cmd msg)) -> FunnelDict model msg
+makeFunnelDict : List (Handler model msg) -> (Value -> Cmd msg) -> FunnelDict model msg
 makeFunnelDict handlers portGetter =
     ( List.map handlerToFunnel handlers |> Dict.fromList
     , portGetter
