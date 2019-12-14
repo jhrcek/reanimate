@@ -4,7 +4,8 @@ import Browser
 import Browser.Events
 import Dict exposing (Dict)
 import Html exposing (Html)
-import Html.Attributes as Attr exposing (src, style, value)
+import Html.Attributes as Attr exposing (disabled, src, style, title, value)
+import Html.Events exposing (onClick)
 import Json.Decode
 import Platform.Sub
 import Ports
@@ -26,8 +27,13 @@ subscriptions : Model -> Sub Msg
 subscriptions model =
     Platform.Sub.batch
         [ Ports.receiveSocketMsg (WebSocket.receive MessageReceived)
-        , Browser.Events.onAnimationFrame TimestampReceived
         , case model.status of
+            AnimationRunning _ _ ->
+                Browser.Events.onAnimationFrame TimestampReceived
+
+            ReceivingFrames _ _ ->
+                Browser.Events.onAnimationFrame TimestampReceived
+
             SomethingWentWrong ConnectionFailed ->
                 Time.every 1000 (always AttemptReconnect)
 
@@ -36,12 +42,22 @@ subscriptions model =
         ]
 
 
+type Msg
+    = MessageReceived (Result Json.Decode.Error WebSocket.WebSocketMsg)
+    | TimestampReceived Posix
+    | AttemptReconnect
+    | PauseClicked Int
+    | PlayClicked
+    | SeekClicked Int
+
+
 type Status
     = Disconnected
     | Connected
     | Compiling
     | ReceivingFrames Int Frames
-    | Animating Int Frames
+    | AnimationRunning Int Frames
+    | AnimationPaused Int Frames Int
     | SomethingWentWrong Problem
 
 
@@ -49,6 +65,7 @@ type Problem
     = CompilationError String
     | ConnectionFailed
     | DoneWithoutFrames
+    | FramesMissing Int
     | PortMessageDecodeFailure Json.Decode.Error
     | UnexpectedMessage String
 
@@ -68,12 +85,12 @@ init _ =
     ( { status = Disconnected
       , clock = millisToPosix 0
       }
-    , connectCmd
+    , connectCommand
     )
 
 
-connectCmd : Cmd msg
-connectCmd =
+connectCommand : Cmd msg
+connectCommand =
     WebSocket.send Ports.sendSocketCommand <|
         WebSocket.Connect
             { name = "TheSocket"
@@ -82,42 +99,62 @@ connectCmd =
             }
 
 
-type Msg
-    = MessageReceived (Result Json.Decode.Error WebSocket.WebSocketMsg)
-    | TimestampReceived Posix
-    | AttemptReconnect
-
-
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         AttemptReconnect ->
-            ( model
-            , connectCmd
-            )
+            ( model, connectCommand )
 
         TimestampReceived clock ->
             ( { model | clock = clock }, Cmd.none )
 
         MessageReceived result ->
-            processResult result model
+            ( processResult result model, Cmd.none )
+
+        PauseClicked frameIndex ->
+            ( case model.status of
+                AnimationRunning frameCount frames ->
+                    { model | status = AnimationPaused frameCount frames frameIndex }
+
+                _ ->
+                    model
+            , Cmd.none
+            )
+
+        PlayClicked ->
+            ( case model.status of
+                AnimationPaused frameCount frames _ ->
+                    { model | status = AnimationRunning frameCount frames }
+
+                _ ->
+                    model
+            , Cmd.none
+            )
+
+        SeekClicked delta ->
+            ( case model.status of
+                AnimationPaused frameCount frames frameIndex ->
+                    { model | status = AnimationPaused frameCount frames (modBy frameCount (frameIndex + delta)) }
+
+                _ ->
+                    model
+            , Cmd.none
+            )
 
 
-processResult : Result Json.Decode.Error WebSocket.WebSocketMsg -> Model -> ( Model, Cmd Msg )
+processResult : Result Json.Decode.Error WebSocket.WebSocketMsg -> Model -> Model
 processResult result model =
     case result of
         Err decodeError ->
-            ( { model | status = SomethingWentWrong (PortMessageDecodeFailure decodeError) }
-            , Cmd.none
-            )
+            { model | status = SomethingWentWrong (PortMessageDecodeFailure decodeError) }
 
         Ok wsMsg ->
             case wsMsg of
                 WebSocket.Error { error } ->
-                    ( { model | status = SomethingWentWrong (UnexpectedMessage error) }, Cmd.none )
+                    { model | status = SomethingWentWrong (UnexpectedMessage error) }
 
                 WebSocket.Data { data } ->
-                    ( processMessage data model, Cmd.none )
+                    processMessage data model
 
 
 processMessage : String -> Model -> Model
@@ -137,7 +174,11 @@ processMessage data model =
                 "Done" ->
                     case model.status of
                         ReceivingFrames frameCount frames ->
-                            { model | status = Animating frameCount frames }
+                            if Dict.keys frames == List.range 0 (frameCount - 1) then
+                                { model | status = AnimationRunning frameCount frames }
+
+                            else
+                                somethingWentWrong (FramesMissing frameCount) model
 
                         _ ->
                             somethingWentWrong DoneWithoutFrames model
@@ -178,11 +219,6 @@ somethingWentWrong what model =
     { model | status = SomethingWentWrong what }
 
 
-bold : String -> Html msg
-bold string =
-    Html.b [] [ Html.text string ]
-
-
 view : Model -> Html Msg
 view model =
     case model.status of
@@ -199,39 +235,86 @@ view model =
             problemView problem
 
         ReceivingFrames frameCount frames ->
-            Html.div []
-                [ progressView (Dict.size frames) frameCount
-                , animationView frameCount frames model.clock
-                ]
+            preliminaryAnimationView frameCount frames model.clock
 
-        Animating frameCount frames ->
+        AnimationRunning frameCount frames ->
             animationView frameCount frames model.clock
 
+        AnimationPaused frameCount frames frameIndex ->
+            manualControlsView frameCount frames frameIndex
 
-animationView : Int -> Frames -> Posix -> Html msg
-animationView frameCount frames clock =
+
+frameIndexAt : Posix -> Int -> Int
+frameIndexAt now frameCount =
+    (posixToMillis now * 60) // 1000 |> modBy frameCount
+
+
+preliminaryAnimationView : Int -> Frames -> Posix -> Html Msg
+preliminaryAnimationView frameCount frames clock =
     let
-        now =
-            (posixToMillis clock * 60) // 1000
-
-        thisFrame =
-            modBy frameCount now
+        frameIndex =
+            frameIndexAt clock frameCount
 
         bestFrame =
-            List.head (List.reverse (Dict.values (Dict.filter (\x _ -> x <= thisFrame) frames)))
-    in
-    Html.div [ style "width" "100%", style "height" "100%" ]
-        [ bold "Frame: "
-        , Html.text (String.fromInt thisFrame ++ " / " ++ String.fromInt frameCount)
-        , Html.div []
-            [ case bestFrame of
-                Nothing ->
-                    Html.text "No frames available"
+            List.head (List.reverse (Dict.values (Dict.filter (\x _ -> x <= frameIndex) frames)))
 
-                Just path ->
-                    Html.img [ src path ] []
-            ]
+        controls =
+            progressView (Dict.size frames) frameCount
+    in
+    frameView frameIndex frameCount controls bestFrame
+
+
+animationView : Int -> Frames -> Posix -> Html Msg
+animationView frameCount frames clock =
+    let
+        frameIndex =
+            frameIndexAt clock frameCount
+
+        controls =
+            playControls False frameIndex
+    in
+    Dict.get frameIndex frames
+        |> frameView frameIndex frameCount controls
+
+
+manualControlsView : Int -> Frames -> Int -> Html Msg
+manualControlsView frameCount frames frameIndex =
+    let
+        controls =
+            playControls True frameIndex
+    in
+    Dict.get frameIndex frames
+        |> frameView frameIndex frameCount controls
+
+
+playControls : Bool -> Int -> Html Msg
+playControls paused frameIndex =
+    Html.div [ style "display" "inline-block" ]
+        [ Html.button [ onClick (SeekClicked -10), disabled (not paused), title "10 frames back" ] [ Html.text "<<" ]
+        , Html.button [ onClick (SeekClicked -1), disabled (not paused), title "1 frame back" ] [ Html.text "<" ]
+        , if paused then
+            Html.button [ onClick PlayClicked, disabled (not paused) ] [ Html.text "Play" ]
+
+          else
+            Html.button [ onClick (PauseClicked frameIndex), disabled paused ] [ Html.text "Pause" ]
+        , Html.button [ onClick (SeekClicked 1), disabled (not paused), title "1 frame forward" ] [ Html.text ">" ]
+        , Html.button [ onClick (SeekClicked 10), disabled (not paused), title "10 frames forward" ] [ Html.text ">>" ]
         ]
+
+
+frameView : Int -> Int -> Html Msg -> Maybe String -> Html Msg
+frameView frameIndex frameCount controls maybeSvgUrl =
+    case maybeSvgUrl of
+        Just svgUrl ->
+            Html.div [ style "width" "100%", style "height" "100%" ]
+                [ Html.b [] [ Html.text "Frame: " ]
+                , Html.text (String.fromInt frameIndex ++ " / " ++ String.fromInt frameCount ++ " ")
+                , controls
+                , Html.img [ src svgUrl ] []
+                ]
+
+        Nothing ->
+            Html.text ""
 
 
 progressView : Int -> Int -> Html msg
@@ -272,3 +355,6 @@ problemView problem =
 
         UnexpectedMessage problemDescription ->
             Html.text ("Unexpected message: " ++ problemDescription)
+
+        FramesMissing frameCount ->
+            Html.text ("Frame indices were not continuous block of number from 0 to " ++ String.fromInt (frameCount - 1))
