@@ -23,8 +23,9 @@ description:
   viewer and auto-reloader.
 
 
-data-files:           viewer-elm/dist/elm.js
-                      viewer-elm/dist/index.html
+data-files:           viewer-elm/dist/index.html
+                      viewer-elm/dist/elm.js
+                      viewer-elm/dist/style.css
                       data/CIExyz.csv
                       data/CIE_XYZ.csv
                       data/cone_sensitivity_lms.csv

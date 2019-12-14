@@ -4,7 +4,7 @@ import Browser
 import Browser.Events
 import Dict exposing (Dict)
 import Html exposing (Html)
-import Html.Attributes as Attr exposing (disabled, src, style, title, value)
+import Html.Attributes as Attr exposing (class, disabled, src, style, title, value)
 import Html.Events exposing (onClick)
 import Json.Decode
 import Platform.Sub
@@ -221,27 +221,29 @@ somethingWentWrong what model =
 
 view : Model -> Html Msg
 view model =
-    case model.status of
-        Disconnected ->
-            Html.text "Disconnected"
+    Html.div [ class "app" ]
+        [ case model.status of
+            Disconnected ->
+                Html.text "Disconnected"
 
-        Connected ->
-            Html.text "Connected"
+            Connected ->
+                Html.text "Connected"
 
-        Compiling ->
-            Html.text "Compiling"
+            Compiling ->
+                Html.text "Compiling.."
 
-        SomethingWentWrong problem ->
-            problemView problem
+            SomethingWentWrong problem ->
+                problemView problem
 
-        ReceivingFrames frameCount frames ->
-            preliminaryAnimationView frameCount frames model.clock
+            ReceivingFrames frameCount frames ->
+                preliminaryAnimationView frameCount frames model.clock
 
-        AnimationRunning frameCount frames ->
-            animationView frameCount frames model.clock
+            AnimationRunning frameCount frames ->
+                animationView frameCount frames model.clock
 
-        AnimationPaused frameCount frames frameIndex ->
-            manualControlsView frameCount frames frameIndex
+            AnimationPaused frameCount frames frameIndex ->
+                manualControlsView frameCount frames frameIndex
+        ]
 
 
 frameIndexAt : Posix -> Int -> Int
@@ -289,7 +291,7 @@ manualControlsView frameCount frames frameIndex =
 
 playControls : Bool -> Int -> Html Msg
 playControls paused frameIndex =
-    Html.div [ style "display" "inline-block" ]
+    Html.div [ class "media-controls" ]
         [ Html.button [ onClick (SeekClicked -10), disabled (not paused), title "10 frames back" ] [ Html.text "<<" ]
         , Html.button [ onClick (SeekClicked -1), disabled (not paused), title "1 frame back" ] [ Html.text "<" ]
         , if paused then
@@ -304,23 +306,31 @@ playControls paused frameIndex =
 
 frameView : Int -> Int -> Html Msg -> Maybe String -> Html Msg
 frameView frameIndex frameCount controls maybeSvgUrl =
-    case maybeSvgUrl of
-        Just svgUrl ->
-            let
-                frameCountStr =
-                    String.fromInt frameCount
+    let
+        image =
+            case maybeSvgUrl of
+                Just svgUrl ->
+                    Html.img [ src svgUrl ] []
 
-                digitCount =
-                    String.length frameCountStr
-            in
-            Html.div [ style "width" "100%", style "height" "100%" ]
+                Nothing ->
+                    Html.text ""
+
+        frameCountStr =
+            String.fromInt frameCount
+
+        digitCount =
+            String.length frameCountStr
+
+        bar =
+            Html.pre [ class "bar" ]
                 [ Html.text ("Frame: " ++ String.padLeft digitCount '0' (String.fromInt frameIndex) ++ " / " ++ frameCountStr ++ " ")
                 , controls
-                , Html.img [ src svgUrl ] []
                 ]
-
-        Nothing ->
-            Html.text ""
+    in
+    Html.div [ class "viewer" ]
+        [ image
+        , bar
+        ]
 
 
 progressView : Int -> Int -> Html msg
