@@ -306,9 +306,15 @@ frameView : Int -> Int -> Html Msg -> Maybe String -> Html Msg
 frameView frameIndex frameCount controls maybeSvgUrl =
     case maybeSvgUrl of
         Just svgUrl ->
+            let
+                frameCountStr =
+                    String.fromInt frameCount
+
+                digitCount =
+                    String.length frameCountStr
+            in
             Html.div [ style "width" "100%", style "height" "100%" ]
-                [ Html.b [] [ Html.text "Frame: " ]
-                , Html.text (String.fromInt frameIndex ++ " / " ++ String.fromInt frameCount ++ " ")
+                [ Html.text ("Frame: " ++ String.padLeft digitCount '0' (String.fromInt frameIndex) ++ " / " ++ frameCountStr ++ " ")
                 , controls
                 , Html.img [ src svgUrl ] []
                 ]
@@ -343,7 +349,7 @@ problemView problem =
                 [ Html.text "Failed to establish connection. Possible causes include: "
                 , Html.ul []
                     [ Html.li [] [ Html.text "The reanimate script is not running" ]
-                    , Html.li [] [ Html.text "At most one viewer window can connect at time. Maybe there's another browser window/tab already connected." ]
+                    , Html.li [] [ Html.text "At most one viewer window can connect at time. Maybe there's another browser window/tab already connected?" ]
                     ]
                 ]
 
