@@ -3,13 +3,11 @@ module Main exposing (main)
 import Browser
 import Browser.Events
 import Dict exposing (Dict)
-import Html exposing (Html, button, div, h1, img, input, p, text)
-import Html.Attributes as Attr exposing (size, src, style, value)
-import Html.Events exposing (onClick, onInput)
+import Html exposing (Html)
+import Html.Attributes as Attr exposing (src, style, value)
 import Json.Decode
 import Platform.Sub
 import Ports
-import Task
 import Time exposing (Posix, millisToPosix, posixToMillis)
 import WebSocket
 
@@ -29,97 +27,73 @@ subscriptions model =
     Platform.Sub.batch
         [ Ports.receiveSocketMsg (WebSocket.receive MessageReceived)
         , Browser.Events.onAnimationFrame TimestampReceived
-        , case model.connectionStatus of
-            TryingToConnect ->
-                Time.every 1000 (always TryToConnect)
+        , case model.status of
+            SomethingWentWrong ConnectionFailed ->
+                Time.every 1000 (always AttemptReconnect)
 
             _ ->
                 Sub.none
         ]
 
 
-type ConnectionStatus
-    = TryingToConnect
+type Status
+    = Disconnected
     | Connected
-    | Disconnected
     | Compiling
-    | ReceivingFrames Int
-    | Animating
+    | ReceivingFrames Int Frames
+    | Animating Int Frames
+    | SomethingWentWrong Problem
+
+
+type Problem
+    = CompilationError String
+    | ConnectionFailed
+    | DoneWithoutFrames
+    | PortMessageDecodeFailure Json.Decode.Error
+    | UnexpectedMessage String
 
 
 type alias Model =
-    { log : List String
-    , error : Maybe String
-    , frameCount : Maybe Int
-    , frames : Dict Int String
+    { status : Status
     , clock : Posix
-    , connectionStatus : ConnectionStatus
     }
 
 
-sockerUrl : String
-sockerUrl =
-    "ws://localhost:9161"
-
-
-socketName : String
-socketName =
-    "TheSocket"
+type alias Frames =
+    Dict Int String
 
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( { log = []
-      , error = Nothing
-      , frameCount = Nothing
-      , frames = Dict.empty
+    ( { status = Disconnected
       , clock = millisToPosix 0
-      , connectionStatus = TryingToConnect
       }
-    , connectCmd sockerUrl
+    , connectCmd
     )
 
 
-connectCmd : String -> Cmd msg
-connectCmd url =
+connectCmd : Cmd msg
+connectCmd =
     WebSocket.send Ports.sendSocketCommand <|
         WebSocket.Connect
-            { name = socketName
-            , address = url
+            { name = "TheSocket"
+            , address = "ws://localhost:9161"
             , protocol = ""
             }
 
 
-closeCmd : Cmd msg
-closeCmd =
-    WebSocket.send Ports.sendSocketCommand <|
-        WebSocket.Close { name = socketName }
-
-
 type Msg
     = MessageReceived (Result Json.Decode.Error WebSocket.WebSocketMsg)
-    | ConnectClicked
-    | CloseClicked
     | TimestampReceived Posix
-      -- TODO what happened?
-    | TryToConnect
+    | AttemptReconnect
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        TryToConnect ->
-            ( { model | connectionStatus = Connected }, connectCmd sockerUrl )
-
-        ConnectClicked ->
-            ( model |> logMessage ("Connecting to " ++ sockerUrl)
-            , connectCmd sockerUrl
-            )
-
-        CloseClicked ->
-            ( { model | frames = Dict.empty, connectionStatus = Disconnected }
-                |> logMessage "Closing"
-            , closeCmd
+        AttemptReconnect ->
+            ( model
+            , connectCmd
             )
 
         TimestampReceived clock ->
@@ -133,12 +107,14 @@ processResult : Result Json.Decode.Error WebSocket.WebSocketMsg -> Model -> ( Mo
 processResult result model =
     case result of
         Err decodeError ->
-            ( { model | error = Just <| Json.Decode.errorToString decodeError }, Cmd.none )
+            ( { model | status = SomethingWentWrong (PortMessageDecodeFailure decodeError) }
+            , Cmd.none
+            )
 
         Ok wsMsg ->
             case wsMsg of
                 WebSocket.Error { error } ->
-                    ( { model | error = Just error }, Cmd.none )
+                    ( { model | status = SomethingWentWrong (UnexpectedMessage error) }, Cmd.none )
 
                 WebSocket.Data { data } ->
                     ( processMessage data model, Cmd.none )
@@ -147,59 +123,71 @@ processResult result model =
 processMessage : String -> Model -> Model
 processMessage data model =
     case String.lines data of
+        [ "connection established" ] ->
+            { model | status = Connected }
+
+        [ "connection failed" ] ->
+            somethingWentWrong ConnectionFailed model
+
         [ "status", status ] ->
             case status of
                 "Compiling" ->
-                    { model | connectionStatus = Compiling }
+                    { model | status = Compiling }
 
                 "Done" ->
-                    { model | connectionStatus = Animating }
+                    case model.status of
+                        ReceivingFrames frameCount frames ->
+                            { model | status = Animating frameCount frames }
 
-                -- TODO deal with this somehow
-                other ->
-                    model
+                        _ ->
+                            somethingWentWrong DoneWithoutFrames model
+
+                _ ->
+                    somethingWentWrong (UnexpectedMessage ("Unknown status: '" ++ status ++ "'")) model
+
+        "error" :: errorLines ->
+            somethingWentWrong (CompilationError (String.join "\n" errorLines)) model
 
         [ "frame_count", n ] ->
-            { model
-                | connectionStatus = ReceivingFrames <| Maybe.withDefault 0 <| String.toInt n
-                , frameCount = String.toInt n
-            }
+            case String.toInt n of
+                Just frameCount ->
+                    { model | status = ReceivingFrames frameCount Dict.empty }
 
-        [ "frame", n, svg ] ->
-            let
-                nth =
-                    Maybe.withDefault 0 (String.toInt n)
-            in
-            { model | frames = Dict.insert nth svg model.frames }
+                Nothing ->
+                    somethingWentWrong (UnexpectedMessage ("frame_count wasn't number, but '" ++ n ++ "'")) model
+
+        [ "frame", n, svgUrl ] ->
+            case String.toInt n of
+                Just frameIndex ->
+                    case model.status of
+                        ReceivingFrames frameCount frames ->
+                            { model | status = ReceivingFrames frameCount (Dict.insert frameIndex svgUrl frames) }
+
+                        _ ->
+                            somethingWentWrong (UnexpectedMessage "Got 'frame' message while not ReceivingFrames") model
+
+                Nothing ->
+                    somethingWentWrong (UnexpectedMessage ("Frame index wasn't number, but '" ++ n ++ "'")) model
 
         _ ->
-            model
-                |> logMessage ("Message not recognized \"" ++ data ++ "\"")
+            somethingWentWrong (UnexpectedMessage data) model
 
 
-logMessage : String -> Model -> Model
-logMessage msg model =
-    { model | log = msg :: model.log }
+somethingWentWrong : Problem -> Model -> Model
+somethingWentWrong what model =
+    { model | status = SomethingWentWrong what }
 
 
 bold : String -> Html msg
 bold string =
-    Html.b [] [ text string ]
-
-
-br : Html msg
-br =
-    Html.br [] []
+    Html.b [] [ Html.text string ]
 
 
 view : Model -> Html Msg
 view model =
-    case model.connectionStatus of
-        TryingToConnect ->
-            Html.text "Trying to connect"
-
+    case model.status of
         Disconnected ->
-            Html.div [] [ Html.button [ onClick ConnectClicked ] [ text "Connect" ] ]
+            Html.text "Disconnected"
 
         Connected ->
             Html.text "Connected"
@@ -207,50 +195,80 @@ view model =
         Compiling ->
             Html.text "Compiling"
 
-        ReceivingFrames totalFrames ->
-            progressIndicator (Dict.size model.frames) totalFrames
+        SomethingWentWrong problem ->
+            problemView problem
 
-        Animating ->
-            let
-                frameCount =
-                    Maybe.withDefault 1 model.frameCount
-
-                now =
-                    (posixToMillis model.clock * 60) // 1000
-
-                thisFrame =
-                    modBy frameCount now
-
-                bestFrame =
-                    List.head (List.reverse (Dict.values (Dict.filter (\x _ -> x <= thisFrame) model.frames)))
-            in
-            div
-                [ style "width" "100%" ]
-                [ button [ onClick CloseClicked ] [ text "Close" ]
-                , br
-                , bold "Frame: "
-                , text (String.fromInt thisFrame)
-                , br
-                , case bestFrame of
-                    Nothing ->
-                        bold "no frames yet"
-
-                    Just path ->
-                        img [ src path ] []
-                , Html.div []
-                    (bold "Log:"
-                        :: List.intersperse br (List.map text model.log)
-                    )
+        ReceivingFrames frameCount frames ->
+            Html.div []
+                [ progressView (Dict.size frames) frameCount
+                , animationView frameCount frames model.clock
                 ]
 
+        Animating frameCount frames ->
+            animationView frameCount frames model.clock
 
-progressIndicator : Int -> Int -> Html msg
-progressIndicator receivedFrames totalFrames =
-    Html.div []
-        [ bold "Loading frames "
+
+animationView : Int -> Frames -> Posix -> Html msg
+animationView frameCount frames clock =
+    let
+        now =
+            (posixToMillis clock * 60) // 1000
+
+        thisFrame =
+            modBy frameCount now
+
+        bestFrame =
+            List.head (List.reverse (Dict.values (Dict.filter (\x _ -> x <= thisFrame) frames)))
+    in
+    Html.div [ style "width" "100%", style "height" "100%" ]
+        [ bold "Frame: "
+        , Html.text (String.fromInt thisFrame ++ " / " ++ String.fromInt frameCount)
+        , Html.div []
+            [ case bestFrame of
+                Nothing ->
+                    Html.text "No frames available"
+
+                Just path ->
+                    Html.img [ src path ] []
+            ]
+        ]
+
+
+progressView : Int -> Int -> Html msg
+progressView receivedFrames frameCount =
+    Html.label []
+        [ Html.text "Loading frames "
         , Html.progress
             [ value (String.fromInt receivedFrames)
-            , Attr.max (String.fromInt totalFrames)
+            , Attr.max (String.fromInt frameCount)
             ]
             []
         ]
+
+
+problemView : Problem -> Html msg
+problemView problem =
+    case problem of
+        CompilationError error ->
+            Html.div []
+                [ Html.h1 [] [ Html.text "Compilation failed" ]
+                , Html.pre [] [ Html.text error ]
+                ]
+
+        ConnectionFailed ->
+            Html.div []
+                [ Html.text "Failed to establish connection. Possible causes include: "
+                , Html.ul []
+                    [ Html.li [] [ Html.text "The reanimate script is not running" ]
+                    , Html.li [] [ Html.text "At most one viewer window can connect at time. Maybe there's another browser window/tab already connected." ]
+                    ]
+                ]
+
+        DoneWithoutFrames ->
+            Html.text "Received 'done' message, but I was not receiving frames!"
+
+        PortMessageDecodeFailure decodeError ->
+            Html.text ("Failed to decode Port message. The error was: " ++ Json.Decode.errorToString decodeError)
+
+        UnexpectedMessage problemDescription ->
+            Html.text ("Unexpected message: " ++ problemDescription)
