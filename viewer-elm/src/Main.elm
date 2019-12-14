@@ -9,6 +9,7 @@ import Html.Events exposing (onClick, onInput)
 import Json.Decode
 import Platform.Sub
 import Ports
+import Task
 import Time exposing (Posix, millisToPosix, posixToMillis)
 import WebSocket
 
@@ -24,28 +25,40 @@ main =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions _ =
+subscriptions model =
     Platform.Sub.batch
         [ Ports.receiveSocketMsg (WebSocket.receive MessageReceived)
         , Browser.Events.onAnimationFrame TimestampReceived
+        , case model.connectionStatus of
+            TryingToConnect ->
+                Time.every 1000 (always TryToConnect)
+
+            _ ->
+                Sub.none
         ]
+
+
+type ConnectionStatus
+    = TryingToConnect
+    | Connected
+    | Disconnected
+    | Compiling
+    | ReceivingFrames Int
+    | Animating
 
 
 type alias Model =
     { log : List String
-    , url : String
-    , wasLoaded : Bool
-    , key : String
     , error : Maybe String
     , frameCount : Maybe Int
-    , status : String
     , frames : Dict Int String
     , clock : Posix
+    , connectionStatus : ConnectionStatus
     }
 
 
-defaultUrl : String
-defaultUrl =
+sockerUrl : String
+sockerUrl =
     "ws://localhost:9161"
 
 
@@ -57,16 +70,13 @@ socketName =
 init : () -> ( Model, Cmd Msg )
 init _ =
     ( { log = []
-      , url = defaultUrl
-      , wasLoaded = False
-      , key = "socket"
       , error = Nothing
       , frameCount = Nothing
-      , status = "Not connected"
       , frames = Dict.empty
       , clock = millisToPosix 0
+      , connectionStatus = TryingToConnect
       }
-    , Cmd.none
+    , connectCmd sockerUrl
     )
 
 
@@ -87,26 +97,27 @@ closeCmd =
 
 
 type Msg
-    = UrlUpdated String
-    | MessageReceived (Result Json.Decode.Error WebSocket.WebSocketMsg)
+    = MessageReceived (Result Json.Decode.Error WebSocket.WebSocketMsg)
     | ConnectClicked
     | CloseClicked
     | TimestampReceived Posix
+      -- TODO what happened?
+    | TryToConnect
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        UrlUpdated url ->
-            ( { model | url = url }, Cmd.none )
+        TryToConnect ->
+            ( { model | connectionStatus = Connected }, connectCmd sockerUrl )
 
         ConnectClicked ->
-            ( model |> logMessage ("Connecting to " ++ model.url)
-            , connectCmd model.url
+            ( model |> logMessage ("Connecting to " ++ sockerUrl)
+            , connectCmd sockerUrl
             )
 
         CloseClicked ->
-            ( { model | frames = Dict.empty, status = "Not connected" }
+            ( { model | frames = Dict.empty, connectionStatus = Disconnected }
                 |> logMessage "Closing"
             , closeCmd
             )
@@ -137,10 +148,22 @@ processMessage : String -> Model -> Model
 processMessage data model =
     case String.lines data of
         [ "status", status ] ->
-            { model | status = status }
+            case status of
+                "Compiling" ->
+                    { model | connectionStatus = Compiling }
+
+                "Done" ->
+                    { model | connectionStatus = Animating }
+
+                -- TODO deal with this somehow
+                other ->
+                    model
 
         [ "frame_count", n ] ->
-            { model | frameCount = String.toInt n }
+            { model
+                | connectionStatus = ReceivingFrames <| Maybe.withDefault 0 <| String.toInt n
+                , frameCount = String.toInt n
+            }
 
         [ "frame", n, svg ] ->
             let
@@ -171,79 +194,63 @@ br =
 
 view : Model -> Html Msg
 view model =
-    let
-        frameCount =
-            Maybe.withDefault 1 model.frameCount
+    case model.connectionStatus of
+        TryingToConnect ->
+            Html.text "Trying to connect"
 
-        now =
-            (posixToMillis model.clock * 60) // 1000
+        Disconnected ->
+            Html.div [] [ Html.button [ onClick ConnectClicked ] [ text "Connect" ] ]
 
-        thisFrame =
-            modBy frameCount now
+        Connected ->
+            Html.text "Connected"
 
-        bestFrame =
-            List.head (List.reverse (Dict.values (Dict.filter (\x _ -> x <= thisFrame) model.frames)))
-    in
-    div
-        [ style "width" "40em"
-        , style "margin" "auto"
-        , style "margin-top" "1em"
-        , style "padding" "1em"
-        , style "border" "solid"
-        ]
-        [ h1 [] [ text "Reanimate: elm viewer" ]
-        , p []
-            [ bold "url: "
-            , input
-                [ value model.url
-                , onInput UrlUpdated
-                , size 30
+        Compiling ->
+            Html.text "Compiling"
 
-                -- , disabled isConnected
+        ReceivingFrames totalFrames ->
+            progressIndicator (Dict.size model.frames) totalFrames
+
+        Animating ->
+            let
+                frameCount =
+                    Maybe.withDefault 1 model.frameCount
+
+                now =
+                    (posixToMillis model.clock * 60) // 1000
+
+                thisFrame =
+                    modBy frameCount now
+
+                bestFrame =
+                    List.head (List.reverse (Dict.values (Dict.filter (\x _ -> x <= thisFrame) model.frames)))
+            in
+            div
+                [ style "width" "100%" ]
+                [ button [ onClick CloseClicked ] [ text "Close" ]
+                , br
+                , bold "Frame: "
+                , text (String.fromInt thisFrame)
+                , br
+                , case bestFrame of
+                    Nothing ->
+                        bold "no frames yet"
+
+                    Just path ->
+                        img [ src path ] []
+                , Html.div []
+                    (bold "Log:"
+                        :: List.intersperse br (List.map text model.log)
+                    )
                 ]
-                []
-            , text " "
-            , button [ onClick ConnectClicked ] [ text "Connect" ]
 
-            -- TODO add WS state management and show just one button at time
-            , button [ onClick CloseClicked ] [ text "Close" ]
-            , br
-            , bold "Frame: "
-            , text (String.fromInt thisFrame)
-            , br
-            , case bestFrame of
-                Nothing ->
-                    bold "no frames yet"
 
-                Just path ->
-                    img [ src path ] []
-            , bold "Status: "
-            , text model.status
-            , br
-            , progressIndicator model
+progressIndicator : Int -> Int -> Html msg
+progressIndicator receivedFrames totalFrames =
+    Html.div []
+        [ bold "Loading frames "
+        , Html.progress
+            [ value (String.fromInt receivedFrames)
+            , Attr.max (String.fromInt totalFrames)
             ]
-        , p [] <|
-            bold "Log:"
-                :: List.intersperse br (List.map text model.log)
+            []
         ]
-
-
-progressIndicator : Model -> Html msg
-progressIndicator { frames, frameCount } =
-    case frameCount of
-        Nothing ->
-            bold "No frames available"
-
-        Just frameCnt ->
-            if Dict.size frames == frameCnt then
-                bold (String.fromInt frameCnt ++ " frames loaded")
-
-            else
-                Html.div []
-                    [ bold "Loading frames "
-                    , Html.progress
-                        [ Attr.max (String.fromInt frameCnt)
-                        , value (String.fromInt <| Dict.size frames)
-                        ]
-                        []
-                    ]

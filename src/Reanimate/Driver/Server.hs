@@ -80,7 +80,7 @@ ignoreErrors action = action `catch` \(_::SomeException) -> return ()
 
 openViewer :: IO ()
 openViewer = do
-  url <- getDataFileName "viewer/build/index.html"
+  url <- getDataFileName "viewer-elm/dist/index.html"
   putStrLn "Opening browser..."
   bSucc <- openBrowser url
   if bSucc

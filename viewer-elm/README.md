@@ -11,5 +11,5 @@ npm run minify
 ## Develop it
 ```bash
 npm install
-npm dev-server
+npm run dev-server
 ```
